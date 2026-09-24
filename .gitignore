@@ -1,0 +1,100 @@
+# OS Artifacts
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Build Artifacts & CMake
+**/build/
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+!CMakeLists.txt
+!backend/cpp/cmake/*.cmake
+compile_commands.json
+*.o
+*.a
+*.so
+*.dylib
+*.out
+
+# GoogleTest FetchContent cache
+_deps/
+
+# ROS 2 Build / Install / Log Directories
+backend/ros2_ws/build/
+backend/ros2_ws/install/
+backend/ros2_ws/log/
+log/
+install/
+
+# Node / Frontend Artifacts
+**/node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# Python Caches & Environments
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Datasets & Large Sensor Files
+datasets/*
+!datasets/.gitkeep
+*.pcd
+*.bin
+*.las
+*.laz
+*.ply
+
+# Model Weights & Checkpoints
+models/*
+!models/.gitkeep
+*.pt
+*.pth
+*.onnx
+*.engine
+*.weights
+*.ckpt
+
+# Bag / MCAP Recordings & Database Runtime Artifacts
+*.mcap
+*.db3
+*.bag
+results/*
+!results/.gitkeep
+*.sqlite
+*.sqlite3
+*.db
+
+# Test & Coverage Outputs
+Testing/
+*.gcda
+*.gcno
+*.gcov
+coverage/
+
+# IDE / Editor Files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.clangd/
