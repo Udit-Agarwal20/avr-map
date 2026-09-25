@@ -171,3 +171,28 @@ This document records architectural and implementation decisions for the **AVR-M
   11. **EvidenceSummary Variance Semantics**: `EvidenceSummary::elevation_variance` explicitly represents the population variance ($M2 / n$) of observations present inside the requested frame-local region footprint (nullopt if empty, 0.0 for $n=1$). Sample variance remains available separately via `ElevationStats::sampleVariance()`.
 - **Reason**: Implements a transparent, deterministic, and numerically safe evidence extraction pipeline that satisfies the M4 evidence gate without fabricating uncalibrated physical metrics or mutating the persistent map hierarchy.
 - **Consequences**: Physical LiDAR calibration and learned terrain segmentation remain deferred to future perception modules; downstream consumers must interpret prototype signals according to their defined geometric proxies.
+
+---
+
+## ADR-011: Geometry-Only Adaptive Frame Topology Application Policy
+
+- **Status**: Accepted
+- **Context**: Milestone 6 introduces `AdaptiveFrameProcessor`, connecting `FrameEvidence`, `ResolutionSignals`, `ResolutionController`, and `AdaptiveHierarchy` for an end-to-end geometry-only frame processing pipeline. A concrete policy is required to govern how frame-local evidence decisions are translated into hierarchical spatial partitioning without compromising M3 topological safety or pre-empting the persistent adaptive map.
+- **Decision**:
+  1. **Frame-Derived Topology Rebuild**: Topology is rebuilt per valid sensor frame. Each incoming valid frame resets the previous frame's adaptive hierarchy and instantiates new topology derived exclusively from current frame measurements.
+  2. **Sparse Evidence-Driven Root Seeding**: Sparse $L3$ roots are allocated in `AdaptiveHierarchy` ONLY where active frame evidence exists (discovered from `FrameEvidence::baseCellSnapshot()`). Unobserved world space contains zero allocated roots.
+  3. **Empty Structural Sibling Rule**: When an evidence-containing node splits, all four direct children are created to satisfy M3's quadtree topology coverage invariants. Any child containing zero frame observations remains a structural coverage LEAF at that level and is NEVER recursively evaluated or refined from distance baseline alone. This strictly prevents the generation of dense near-field hierarchies over unobserved space.
+  4. **Monotonic Effective Target Propagation**: For any evaluated evidence-containing region:
+     $$\text{local\_target} = \text{local\_decision.requested\_level}$$
+     $$\text{effective\_target} = \min(\text{local\_target}, \text{inherited\_target})$$
+     $$\text{inherited\_target}_{\text{root}} = L3$$
+     Descendants inherit the finest target required by their ancestors. A child may request even finer representation than its ancestor, but cannot undo or coarsen an ancestor requirement down an observed branch.
+  5. **Diagnostic Reason Lineage Semantics**: Decision diagnostics record both local reasons and ancestor reasons:
+     $$\text{effective\_reasons} = \text{local\_reasons} \cup \text{inherited\_reasons}$$
+     `effective_reasons` is a cumulative diagnostic lineage union representing all ancestral and local cues encountered down the branch. It is NOT guaranteed to be the minimal mathematical causal set of bits necessary to reproduce `effective_target`. Future inspection tools must present it as ancestral context rather than asserting that every individual bit caused the local numeric level.
+  6. **Fixed Geometry-Only Upstream Defaults**: The M6 production pipeline supplies fixed defaults for unsegmented perception cues (`SemanticRelevance::NONE`, `DynamicRelevance::NONE`, `uncertainty = std::nullopt`). Resolution decisions depend exclusively on distance baseline, spatial support density, and M5 vertical-relief geometry complexity.
+  7. **Transactional Frame Guard**: If global frame parameters are invalid (e.g., non-finite sensor origin), `processFrame` fails immediately with `std::nullopt` and preserves previous `FrameEvidence`, `AdaptiveHierarchy`, diagnostics, and statistics completely intact.
+  8. **Single-Writer Processor and Reset Capacity**: `AdaptiveFrameProcessor` is a single-writer object. Frame rebuilds call `AdaptiveHierarchy::reset()`, which clears logical hierarchy nodes and tiles while retaining allocated `TilePool` blocks and container capacities for zero-reallocation reuse.
+  9. **Not Final Persistent Adaptive Map**: M6 generates frame-local adaptive topology only. It does not implement cross-frame temporal fusion, cell observation payloads (elevation/variance per adaptive cell), persistence, coarsening hysteresis, or raw point replay.
+- **Reason**: Provides a rigorous, deterministic, and allocation-controlled bridge between frame evidence and sparse hierarchy topology while preserving clear architectural boundaries ahead of persistent map integration.
+- **Consequences**: Downstream consumers must treat M6 topology as a single-frame geometric view; persistent mapping, cell payloads, and temporal hysteresis will be introduced in subsequent milestones.

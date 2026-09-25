@@ -4,6 +4,7 @@ add_library(avr_mapping_core
   src/resolution_controller.cpp
   src/frame_evidence.cpp
   src/evidence_signal_builder.cpp
+  src/adaptive_frame_processor.cpp
 )
 
 add_library(AVR::mapping_core ALIAS avr_mapping_core)

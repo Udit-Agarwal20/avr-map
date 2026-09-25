@@ -16,6 +16,9 @@ add_executable(avr_mapping_tests
   test_evidence_aggregation.cpp
   test_evidence_signal_builder.cpp
   test_frame_evidence_stress.cpp
+  test_adaptive_frame_processor.cpp
+  test_adaptive_frame_mixed_scene.cpp
+  test_adaptive_frame_pipeline_stress.cpp
 )
 
 target_link_libraries(avr_mapping_tests
