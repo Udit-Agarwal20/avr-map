@@ -2,6 +2,8 @@ add_library(avr_mapping_core
   src/uniform_map.cpp
   src/adaptive_hierarchy.cpp
   src/resolution_controller.cpp
+  src/frame_evidence.cpp
+  src/evidence_signal_builder.cpp
 )
 
 add_library(AVR::mapping_core ALIAS avr_mapping_core)

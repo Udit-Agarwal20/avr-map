@@ -144,3 +144,30 @@ This document records architectural and implementation decisions for the **AVR-M
      - `semantic_critical_target <= semantic_elevated_target` (safety critical hazards cannot be configured coarser than elevated structures).
 - **Reason**: Provides an unambiguous, testable, and deterministic decision engine for M4 while respecting the boundaries of the source documentation and ensuring full configurability.
 - **Consequences**: All threshold values must be loaded from configuration rather than hard-coded into decision logic, and invalid configuration parameters must be rejected at controller construction time.
+
+---
+
+## ADR-010: Frame Evidence Spatial-Coverage Proxy and Vertical-Relief Geometry Signal
+
+- **Status**: Accepted
+- **Context**: Milestone 5 introduces `FrameEvidence` and signal extraction to feed the M4 `ResolutionController`. The decision policy requires an information density indicator and a geometry complexity indicator for its two-part evidence gate. Authoritative project documentation refers to "information density" and "geometry/terrain complexity" conceptually, but does not provide a fixed physical formula for raw unsegmented LiDAR returns.
+- **Decision**:
+  1. **Frame-Local Evidence Lifecycle**: `FrameEvidence` is temporary, frame-local measurement support for one logical sensor frame. It is NOT `UniformMap`, `AdaptiveHierarchy`, persistent map state, or replay history. It is replaced on each `buildFrame` call and does not perform cross-frame temporal fusion.
+  2. **Density Score as Spatial-Coverage Proxy**: Define `density_score` as a normalized frame-local spatial coverage proxy:
+     $$\text{density\_score} = \frac{\text{occupied L0 base cells inside region}}{\text{total possible L0 base cells in region}}$$
+     Capacity per level footprint: $L0 = 1$, $L1 = 4$, $L2 = 16$, $L3 = 64$. Range is $[0.0, 1.0]$.
+     This metric measures spatial support across the cell footprint, not raw return volume. 100 points in one L0 cell yield $\text{density\_score} = 1/64 \approx 0.0156$ at L3, correctly preventing dense clusters on isolated features from masquerading as broad surface coverage.
+  3. **No Calibrated Physical Density Claim**: `density_score` is explicitly a dimensionless prototype coverage proxy. It is NOT claimed to be physical points-per-square-metre or sensor-calibrated beam density.
+  4. **Geometry Complexity as Vertical-Relief Proxy**: Define `geometry_complexity` from normalized vertical relief:
+     $$\text{vertical\_span} = z_{\max} - z_{\min}$$
+     $$\text{region\_width} = \text{resolutionMeters}(\text{region.level})$$
+     $$\text{geometry\_complexity} = \text{clamp}\left(\frac{\text{vertical\_span}}{\text{region\_width}}, 0.0, 1.0\right)$$
+  5. **Geometry Support Gating**: To prevent isolated points from fabricating geometric surface roughness, `geometry_complexity` is evaluated ONLY if the region contains at least 2 observations AND at least 2 distinct occupied L0 base cells. Otherwise, `geometry_complexity = std::nullopt`. If intermediate arithmetic overflows or produces non-finite values, it fails safely to `std::nullopt` without corrupting summary elevation statistics.
+  6. **No Traversability or Learned Feature Claim**: Vertical relief is a transparent geometric cue. It is NOT claimed to represent traversability, ground roughness, slope classification, or learned neural features.
+  7. **No Neural / Model Uncertainty Invention**: `FrameEvidence` does NOT infer model uncertainty from elevation variance. Upstream model uncertainty is passed through if supplied externally; otherwise, `uncertainty = std::nullopt`.
+  8. **Numerically Stable Parallel Welford Aggregation**: Aggregation across arbitrary $L0$–$L3$ footprints uses integer base-grid coordinates (bounded at $\le 64$ lookups) and Chan, Golub, LeVeque (1979) parallel Welford merging. Updates are strictly transactional: arithmetic overflow leaves prior statistics untouched.
+  9. **Transactional Sensor Origin Contract**: `buildFrame` validates finite sensor coordinates before clearing existing frame evidence. If the sensor origin is non-finite, previous valid frame evidence is preserved intact.
+  10. **Observation Count Saturation**: Region observation count is stored as `uint64_t` in `EvidenceSummary` and saturated to `UINT32_MAX` (never wrapped) when constructing `ResolutionSignals`.
+  11. **EvidenceSummary Variance Semantics**: `EvidenceSummary::elevation_variance` explicitly represents the population variance ($M2 / n$) of observations present inside the requested frame-local region footprint (nullopt if empty, 0.0 for $n=1$). Sample variance remains available separately via `ElevationStats::sampleVariance()`.
+- **Reason**: Implements a transparent, deterministic, and numerically safe evidence extraction pipeline that satisfies the M4 evidence gate without fabricating uncalibrated physical metrics or mutating the persistent map hierarchy.
+- **Consequences**: Physical LiDAR calibration and learned terrain segmentation remain deferred to future perception modules; downstream consumers must interpret prototype signals according to their defined geometric proxies.

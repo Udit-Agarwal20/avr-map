@@ -100,6 +100,85 @@ class ElevationStats {
     tryUpdate(z);
   }
 
+  /**
+   * @brief Transactionally merges another ElevationStats into this instance using parallel Welford.
+   *
+   * Uses Chan, Golub, LeVeque (1979) parallel Welford update.
+   * Transactional guarantee: if count overflows or any arithmetic becomes non-finite,
+   * returns false and leaves this instance unmodified.
+   *
+   * @param other Statistics to merge into this instance.
+   * @return true if merged successfully, false if rejected due to overflow or non-finite values.
+   */
+  bool tryMerge(const ElevationStats& other) noexcept {
+    if (other.count_ == 0) {
+      return true;
+    }
+    if (count_ == 0) {
+      if (!std::isfinite(other.mean_) || !std::isfinite(other.m2_) ||
+          !std::isfinite(other.min_) || !std::isfinite(other.max_)) {
+        return false;
+      }
+      mean_ = other.mean_;
+      m2_ = other.m2_;
+      min_ = other.min_;
+      max_ = other.max_;
+      count_ = other.count_;
+      return true;
+    }
+
+    if (other.count_ > std::numeric_limits<uint64_t>::max() - count_) {
+      return false;
+    }
+    const uint64_t cand_count = count_ + other.count_;
+
+    const double delta = other.mean_ - mean_;
+    if (!std::isfinite(delta)) {
+      return false;
+    }
+
+    const double n_a = static_cast<double>(count_);
+    const double n_b = static_cast<double>(other.count_);
+    const double n_total = static_cast<double>(cand_count);
+
+    const double cand_mean = mean_ + delta * (n_b / n_total);
+    if (!std::isfinite(cand_mean)) {
+      return false;
+    }
+
+    // Numerically safe double weight calculation avoids overflowing integer multiplication
+    const double weight = (n_a / n_total) * n_b;
+    const double term = (delta * delta) * weight;
+    if (!std::isfinite(term)) {
+      return false;
+    }
+
+    const double cand_m2 = m2_ + other.m2_ + term;
+    if (!std::isfinite(cand_m2) || cand_m2 < 0.0) {
+      return false;
+    }
+
+    const double cand_min = (other.min_ < min_) ? other.min_ : min_;
+    const double cand_max = (other.max_ > max_) ? other.max_ : max_;
+    if (!std::isfinite(cand_min) || !std::isfinite(cand_max)) {
+      return false;
+    }
+
+    mean_ = cand_mean;
+    m2_ = cand_m2;
+    min_ = cand_min;
+    max_ = cand_max;
+    count_ = cand_count;
+    return true;
+  }
+
+  /**
+   * @brief Merges another ElevationStats into this instance, ignoring numeric failures.
+   */
+  void merge(const ElevationStats& other) noexcept {
+    tryMerge(other);
+  }
+
   [[nodiscard]] constexpr uint64_t count() const noexcept { return count_; }
   [[nodiscard]] constexpr double mean() const noexcept { return mean_; }
   [[nodiscard]] constexpr double m2() const noexcept { return m2_; }

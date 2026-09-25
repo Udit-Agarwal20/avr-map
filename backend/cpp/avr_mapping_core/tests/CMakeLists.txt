@@ -11,6 +11,11 @@ add_executable(avr_mapping_tests
   test_hierarchy_randomized.cpp
   test_resolution_controller.cpp
   test_resolution_policy_matrix.cpp
+  test_evidence_tile.cpp
+  test_frame_evidence.cpp
+  test_evidence_aggregation.cpp
+  test_evidence_signal_builder.cpp
+  test_frame_evidence_stress.cpp
 )
 
 target_link_libraries(avr_mapping_tests

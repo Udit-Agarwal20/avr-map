@@ -139,4 +139,101 @@ TEST(ElevationStatsTest, ResetClearsState) {
   EXPECT_DOUBLE_EQ(stats.sampleVariance(), 0.0);
 }
 
+// Milestone 5: Parallel Welford tryMerge empty cases
+TEST(ElevationStatsTest, TryMergeEmptyCases) {
+  ElevationStats empty1;
+  ElevationStats empty2;
+
+  // empty + empty
+  EXPECT_TRUE(empty1.tryMerge(empty2));
+  EXPECT_EQ(empty1.count(), 0u);
+
+  // non-empty + empty
+  ElevationStats active(5, 10.0, 4.0, 8.0, 12.0);
+  EXPECT_TRUE(active.tryMerge(empty1));
+  EXPECT_EQ(active.count(), 5u);
+  EXPECT_DOUBLE_EQ(active.mean(), 10.0);
+  EXPECT_DOUBLE_EQ(active.m2(), 4.0);
+  EXPECT_DOUBLE_EQ(active.min(), 8.0);
+  EXPECT_DOUBLE_EQ(active.max(), 12.0);
+
+  // empty + non-empty
+  ElevationStats dest;
+  EXPECT_TRUE(dest.tryMerge(active));
+  EXPECT_EQ(dest.count(), 5u);
+  EXPECT_DOUBLE_EQ(dest.mean(), 10.0);
+  EXPECT_DOUBLE_EQ(dest.m2(), 4.0);
+  EXPECT_DOUBLE_EQ(dest.min(), 8.0);
+  EXPECT_DOUBLE_EQ(dest.max(), 12.0);
+}
+
+// Milestone 5: Parallel Welford merge of known sequence groups
+TEST(ElevationStatsTest, TryMergeNormalSequence) {
+  // Group 1: 2, 4, 4, 4
+  ElevationStats g1;
+  g1.update(2.0);
+  g1.update(4.0);
+  g1.update(4.0);
+  g1.update(4.0);
+
+  // Group 2: 5, 5, 7, 9
+  ElevationStats g2;
+  g2.update(5.0);
+  g2.update(5.0);
+  g2.update(7.0);
+  g2.update(9.0);
+
+  EXPECT_TRUE(g1.tryMerge(g2));
+  EXPECT_EQ(g1.count(), 8u);
+  EXPECT_DOUBLE_EQ(g1.mean(), 5.0);
+  EXPECT_DOUBLE_EQ(g1.m2(), 32.0);
+  EXPECT_DOUBLE_EQ(g1.populationVariance(), 4.0);
+  EXPECT_NEAR(g1.sampleVariance(), 32.0 / 7.0, 1e-12);
+  EXPECT_DOUBLE_EQ(g1.min(), 2.0);
+  EXPECT_DOUBLE_EQ(g1.max(), 9.0);
+}
+
+// Milestone 5: tryMerge count overflow safety at uint64_t max
+TEST(ElevationStatsTest, TryMergeCountOverflowSafety) {
+  ElevationStats a(std::numeric_limits<uint64_t>::max() - 5, 10.0, 2.0, 5.0, 15.0);
+  ElevationStats b(10, 12.0, 3.0, 6.0, 18.0);
+
+  // Merging b into a would wrap uint64 -> must fail transactionally
+  EXPECT_FALSE(a.tryMerge(b));
+
+  // a must be completely unchanged
+  EXPECT_EQ(a.count(), std::numeric_limits<uint64_t>::max() - 5);
+  EXPECT_DOUBLE_EQ(a.mean(), 10.0);
+  EXPECT_DOUBLE_EQ(a.m2(), 2.0);
+  EXPECT_DOUBLE_EQ(a.min(), 5.0);
+  EXPECT_DOUBLE_EQ(a.max(), 15.0);
+}
+
+// Milestone 5: tryMerge transaction rollback safety on extreme failure + subsequent valid merge
+TEST(ElevationStatsTest, TryMergeTransactionSafety) {
+  ElevationStats a;
+  a.update(-1e300);
+
+  ElevationStats b;
+  b.update(1e300);
+
+  // delta = 2e300 -> delta^2 overflows to +Inf -> tryMerge must fail
+  EXPECT_FALSE(a.tryMerge(b));
+
+  // Verify accumulator a remains bit-for-bit unmodified
+  EXPECT_EQ(a.count(), 1u);
+  EXPECT_DOUBLE_EQ(a.mean(), -1e300);
+  EXPECT_DOUBLE_EQ(a.m2(), 0.0);
+  EXPECT_DOUBLE_EQ(a.min(), -1e300);
+  EXPECT_DOUBLE_EQ(a.max(), -1e300);
+
+  // Verify a can still participate in a valid merge afterward
+  ElevationStats c;
+  c.update(-1e300);
+  EXPECT_TRUE(a.tryMerge(c));
+  EXPECT_EQ(a.count(), 2u);
+  EXPECT_DOUBLE_EQ(a.mean(), -1e300);
+  EXPECT_DOUBLE_EQ(a.m2(), 0.0);
+}
+
 }  // namespace
