@@ -1,5 +1,6 @@
 add_library(avr_mapping_core
   src/uniform_map.cpp
+  src/adaptive_hierarchy.cpp
 )
 
 add_library(AVR::mapping_core ALIAS avr_mapping_core)

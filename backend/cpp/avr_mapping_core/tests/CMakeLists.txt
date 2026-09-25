@@ -4,6 +4,11 @@ add_executable(avr_mapping_tests
   test_uniform_tile_boundaries.cpp
   test_uniform_map.cpp
   test_uniform_map_stress.cpp
+  test_adaptive_tile.cpp
+  test_tile_pool.cpp
+  test_adaptive_hierarchy.cpp
+  test_hierarchy_boundaries.cpp
+  test_hierarchy_randomized.cpp
 )
 
 target_link_libraries(avr_mapping_tests
