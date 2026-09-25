@@ -118,6 +118,13 @@ class FrameEvidence {
   }
 
   /**
+   * @brief Alias for stats() returning frame evidence statistics.
+   */
+  [[nodiscard]] const FrameEvidenceStats& statistics() const noexcept {
+    return stats_;
+  }
+
+  /**
    * @brief Sequence number of current frame (0 if no frame).
    */
   [[nodiscard]] uint64_t frameSeq() const noexcept {
@@ -155,6 +162,19 @@ class FrameEvidence {
    * @return Aggregated evidence summary.
    */
   [[nodiscard]] EvidenceSummary summarize(avr::spatial::CellKey region) const noexcept;
+
+  /**
+   * @brief Aggregates exact ElevationStats over any valid CellKey region from L0 through L3.
+   *
+   * Uses the same numerically stable aggregation as summarize().
+   * Returns std::nullopt if the frame has no observations in the region.
+   * Does NOT store raw points or alter frame evidence statistics.
+   *
+   * @param region Target CellKey at level L0, L1, L2, or L3.
+   * @return Populated ElevationStats if region contains observations, std::nullopt otherwise.
+   */
+  [[nodiscard]] std::optional<ElevationStats> aggregateElevationStats(
+      avr::spatial::CellKey region) const noexcept;
 
   /**
    * @brief Constructs ResolutionSignals for a target region to feed ResolutionController.

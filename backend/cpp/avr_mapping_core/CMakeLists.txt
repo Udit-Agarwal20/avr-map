@@ -5,6 +5,8 @@ add_library(avr_mapping_core
   src/frame_evidence.cpp
   src/evidence_signal_builder.cpp
   src/adaptive_frame_processor.cpp
+  src/adaptive_payload_store.cpp
+  src/persistent_adaptive_map.cpp
 )
 
 add_library(AVR::mapping_core ALIAS avr_mapping_core)

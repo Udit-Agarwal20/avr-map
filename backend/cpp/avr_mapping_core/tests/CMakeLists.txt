@@ -19,6 +19,12 @@ add_executable(avr_mapping_tests
   test_adaptive_frame_processor.cpp
   test_adaptive_frame_mixed_scene.cpp
   test_adaptive_frame_pipeline_stress.cpp
+  test_adaptive_cell_payload.cpp
+  test_adaptive_payload_store.cpp
+  test_persistent_adaptive_map.cpp
+  test_persistent_payload_fusion.cpp
+  test_persistent_payload_split.cpp
+  test_persistent_payload_stress.cpp
 )
 
 target_link_libraries(avr_mapping_tests

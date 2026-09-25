@@ -180,6 +180,66 @@ EvidenceSummary FrameEvidence::summarize(avr::spatial::CellKey region) const noe
   return summary;
 }
 
+std::optional<ElevationStats> FrameEvidence::aggregateElevationStats(
+    avr::spatial::CellKey region) const noexcept {
+  if (!has_frame_ || stats_.active_base_cells == 0) {
+    return std::nullopt;
+  }
+  if (!avr::spatial::isValidLevel(region.level)) {
+    return std::nullopt;
+  }
+
+  const auto coord = region.decode();
+  const int32_t scale = static_cast<int32_t>(avr::spatial::levelScale(region.level));
+  const int64_t base_x_min_64 = static_cast<int64_t>(coord.x) * scale;
+  const int64_t base_y_min_64 = static_cast<int64_t>(coord.y) * scale;
+  const int64_t base_x_max_64 = base_x_min_64 + scale - 1;
+  const int64_t base_y_max_64 = base_y_min_64 + scale - 1;
+
+  if (base_x_min_64 < std::numeric_limits<int32_t>::min() ||
+      base_x_max_64 > std::numeric_limits<int32_t>::max() ||
+      base_y_min_64 < std::numeric_limits<int32_t>::min() ||
+      base_y_max_64 > std::numeric_limits<int32_t>::max()) {
+    return std::nullopt;
+  }
+
+  uint64_t observation_count = 0;
+  ElevationStats aggregate_elevation{};
+
+  for (int32_t dy = 0; dy < scale; ++dy) {
+    for (int32_t dx = 0; dx < scale; ++dx) {
+      const int32_t gx = static_cast<int32_t>(base_x_min_64 + dx);
+      const int32_t gy = static_cast<int32_t>(base_y_min_64 + dy);
+
+      const avr::spatial::CellCoord base_coord{.x = gx, .y = gy, .level = avr::spatial::L0};
+      const avr::spatial::TileCoord tile_coord = avr::spatial::cellToTileCoord(base_coord);
+      const auto tile_key = avr::spatial::TileKey::fromTileCoord(tile_coord);
+      if (!tile_key.has_value()) {
+        continue;
+      }
+
+      const auto it = tiles_.find(*tile_key);
+      if (it == tiles_.end()) {
+        continue;
+      }
+
+      const uint16_t local_idx = avr::spatial::localCellIndex(gx, gy);
+      if (!it->second.isCellActive(local_idx)) {
+        continue;
+      }
+
+      const auto& cell = it->second.cell(local_idx);
+      observation_count += cell.count();
+      aggregate_elevation.merge(cell.elevation());
+    }
+  }
+
+  if (observation_count == 0) {
+    return std::nullopt;
+  }
+  return aggregate_elevation;
+}
+
 std::optional<ResolutionSignals> FrameEvidence::makeResolutionSignals(
     avr::spatial::CellKey region,
     SemanticRelevance semantic,
