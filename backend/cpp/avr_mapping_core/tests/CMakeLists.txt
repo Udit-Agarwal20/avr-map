@@ -25,6 +25,9 @@ add_executable(avr_mapping_tests
   test_persistent_payload_fusion.cpp
   test_persistent_payload_split.cpp
   test_persistent_payload_stress.cpp
+  test_recent_observation_cache.cpp
+  test_recent_observation_spatial_index.cpp
+  test_recent_observation_cache_stress.cpp
 )
 
 target_link_libraries(avr_mapping_tests

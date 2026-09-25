@@ -7,6 +7,7 @@ add_library(avr_mapping_core
   src/adaptive_frame_processor.cpp
   src/adaptive_payload_store.cpp
   src/persistent_adaptive_map.cpp
+  src/recent_observation_cache.cpp
 )
 
 add_library(AVR::mapping_core ALIAS avr_mapping_core)
