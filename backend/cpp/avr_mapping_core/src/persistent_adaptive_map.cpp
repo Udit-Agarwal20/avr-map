@@ -1,6 +1,7 @@
 #include "avr_mapping/persistent_adaptive_map.hpp"
 
 #include <algorithm>
+#include <map>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -163,14 +164,16 @@ std::optional<PersistentFusionStats> PersistentAdaptiveMap::fuseFrameEvidence(
   }
 
   // ==========================================
-  // PREPARE PHASE
+  // PREPARE PHASE (Strictly Side-Effect Free)
+  // No mutations to AdaptiveHierarchy, AdaptivePayloadStore, frame sequencing, or persistent stats.
   // ==========================================
   const auto base_cells = evidence.baseCellSnapshot();
   if (base_cells.empty()) {
     return std::nullopt;
   }
 
-  std::unordered_map<avr::spatial::CellKey, avr::spatial::GridCoord2D> missing_roots;
+  // Missing L3 roots are PLANNED in deterministic CellKey order, NOT yet created in AdaptiveHierarchy.
+  std::map<avr::spatial::CellKey, avr::spatial::GridCoord2D> planned_roots;
   std::vector<avr::spatial::CellKey> owning_leaves;
   owning_leaves.reserve(base_cells.size());
 
@@ -189,7 +192,7 @@ std::optional<PersistentFusionStats> PersistentAdaptiveMap::fuseFrameEvidence(
       if (!root_key_opt.has_value()) {
         return std::nullopt;
       }
-      missing_roots.try_emplace(*root_key_opt, base_grid);
+      planned_roots.try_emplace(*root_key_opt, base_grid);
       owning_leaves.push_back(*root_key_opt);
     }
   }
@@ -244,10 +247,10 @@ std::optional<PersistentFusionStats> PersistentAdaptiveMap::fuseFrameEvidence(
   }
 
   // ==========================================
-  // COMMIT PHASE
+  // COMMIT PHASE (Executed only after all candidate checks succeed)
   // ==========================================
-  // 1. Ensure missing roots in hierarchy
-  for (const auto& [root_key, base_coord] : missing_roots) {
+  // 1. Ensure planned missing roots in hierarchy in deterministic CellKey order
+  for (const auto& [root_key, base_coord] : planned_roots) {
     if (!hierarchy_.ensureRootForBase(base_coord).has_value()) {
       return std::nullopt;
     }
@@ -282,7 +285,7 @@ std::optional<PersistentFusionStats> PersistentAdaptiveMap::fuseFrameEvidence(
       .frame_seq = frame_seq,
       .input_points = evidence.statistics().input_points,
       .accepted_points = evidence.statistics().accepted_points,
-      .roots_created = missing_roots.size(),
+      .roots_created = planned_roots.size(),
       .unique_leaves_fused = candidates.size(),
       .new_payload_cells = new_payload_cells,
       .updated_payload_cells = updated_payload_cells,
