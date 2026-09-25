@@ -9,6 +9,8 @@ add_executable(avr_mapping_tests
   test_adaptive_hierarchy.cpp
   test_hierarchy_boundaries.cpp
   test_hierarchy_randomized.cpp
+  test_resolution_controller.cpp
+  test_resolution_policy_matrix.cpp
 )
 
 target_link_libraries(avr_mapping_tests

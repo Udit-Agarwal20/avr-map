@@ -108,3 +108,39 @@ This document records architectural and implementation decisions for the **AVR-M
   4. **Internalization of floorDivPositive**: Move `floorDivPositive` to `avr::spatial::detail`. Public callers must use the safe, fallible `avr::spatial::floorDiv(...)` returning `std::optional<T>`. All internal call sites are verified to use strictly positive compile-time constant divisors (1, 2, 4, 8, 16). In release mode, invalid non-positive divisors defensively return `std::numeric_limits<T>::min()` without undefined behavior and without returning a believable fake spatial coordinate.
 - **Reason**: Guarantees unambiguous coordinate frame contracts, prevents silent coordinate frame drift, hardens integer arithmetic against overflow UB, and hides positive-divisor specialization from external consumers.
 - **Consequences**: External callers requiring local grid frames must supply integer `GridOrigin2D` offsets or verified grid-aligned metric coordinates.
+
+---
+
+## ADR-009: Resolution Controller Prototype Thresholds Are Configurable and Non-Optimal Defaults
+
+- **Status**: Accepted
+- **Context**: Milestone 4 implements the pure C++ `ResolutionController` and information-density gate. Authoritative project specifications (PRD Sections 14–18, TRD Sections 32–43, Backend Architecture Specification Sections 56–61) define the canonical distance-based baseline bands ($0 \le d < 10\text{ m} \rightarrow L0$, $10 \le d < 30\text{ m} \rightarrow L1$, $30 \le d < 60\text{ m} \rightarrow L2$, $d \ge 60\text{ m} \rightarrow L3$) and the multi-factor refinement logic for semantics, dynamic objects, uncertainty, and geometry complexity. However, numerical thresholds for continuous signals (such as normalized density score, minimum observation count, high uncertainty threshold, and terrain complexity threshold) are not scientifically optimized or fixed in the source specifications.
+- **Decision**:
+  1. **Canonical Distance Source**: Distance baseline thresholds ($10.0\text{ m}, 30.0\text{ m}, 60.0\text{ m}$) originate directly from PRD Section 14 and TRD Section 34.
+  2. **Conservative Prototype Defaults**: Adopt the following explicit, configurable prototype defaults in `ResolutionPolicyConfig`:
+     - `min_observations = 4`
+     - `min_density_score = 0.25`
+     - `high_uncertainty_threshold = 0.60`
+     - `high_geometry_threshold = 0.50`
+     - `semantic_elevated_target = L1` ($0.10\text{ m}$)
+     - `semantic_critical_target = L0` ($0.05\text{ m}$)
+     - `confirmed_dynamic_target = L0` ($0.05\text{ m}$)
+     - `uncertainty_refinement_steps = 1`
+     - `geometry_refinement_steps = 1`
+  3. **No Optimality Claim**: These values are declared strictly as configurable prototype defaults. No claim of theoretical or empirical optimality is made. Formal parameter calibration will be conducted on real-world datasets (SemanticKITTI, RELLIS-3D) during later benchmarking milestones.
+  4. **Information-Density Gate**: Refinement driven by uncertainty or geometry complexity strictly requires sufficient evidence (`observation_count >= min_observations` and `density_score >= min_density_score`). When evidence is insufficient, uncertainty/geometry refinement is blocked and flagged via `EvidenceState::INSUFFICIENT` and reason bit `DENSITY_GATE_BLOCKED`, preventing the fabrication of high-resolution cells from sparse or unconfirmed measurements.
+  5. **Safety Signal Independence**: Safety-critical semantic cues (`SAFETY_CRITICAL`) and confirmed dynamic objects (`CONFIRMED`) act as maximum-coarseness caps and are not suppressed by the density gate. If an obstacle is detected in sparse returns, the map preserves fine representation for vehicle safety while truthfully reporting `EvidenceState::INSUFFICIENT`.
+  6. **Stateless and Mutation-Free**: The controller is 100% stateless and does not mutate `AdaptiveHierarchy`. Hysteresis and temporal smoothing are separate concerns belonging to the future observation aggregation and map integration pipeline.
+  7. **Independent-Target Combination Algebra**: The decision engine computes independent resolution targets for each active signal:
+     - `baseline_target`: distance baseline derived from continuous metric distance ($L0$–$L3$);
+     - `continuous_target`: distance baseline refined by the SUM of evidence-approved uncertainty and geometry refinement steps ($L_{\text{stepped}} = \max(L0, L_{\text{base}} - (S_{\text{unc}} + S_{\text{geom}}))$);
+     - `semantic_target`: configured semantic maximum-coarseness cap if semantic signal is active;
+     - `dynamic_target`: configured confirmed-dynamic maximum-coarseness cap if confirmed dynamic signal is active.
+     The final requested resolution is the fine-most (minimum level integer) across all active targets:
+     $$\text{requested\_level} = \min(\text{baseline\_target}, \text{continuous\_target}, \text{semantic\_target}, \text{dynamic\_target})$$
+     This guarantees commutativity across independent signal categories, monotonicity toward finer resolution, and avoids procedural sequential double-counting.
+  8. **Configuration Validation Contracts**: Policy validation strictly enforces:
+     - `min_observations >= 1` (zero observations is unconditionally insufficient evidence);
+     - `semantic_critical_target <= semantic_elevated_target` (safety critical hazards cannot be configured coarser than elevated structures).
+- **Reason**: Provides an unambiguous, testable, and deterministic decision engine for M4 while respecting the boundaries of the source documentation and ensuring full configurability.
+- **Consequences**: All threshold values must be loaded from configuration rather than hard-coded into decision logic, and invalid configuration parameters must be rejected at controller construction time.
