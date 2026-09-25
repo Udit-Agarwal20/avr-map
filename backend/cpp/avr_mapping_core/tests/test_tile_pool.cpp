@@ -190,4 +190,48 @@ TEST(TilePoolTest, NonCopyableNonMovableContract) {
   SUCCEED();
 }
 
+// Milestone 3.1: Targeted portable foreign pointer ownership rejection
+TEST(TilePoolTest, PortableForeignPointerRejection) {
+  TilePool pool(16);
+  AdaptiveTile* valid_tile = pool.acquireTile();
+  ASSERT_NE(valid_tile, nullptr);
+  EXPECT_TRUE(pool.owns(valid_tile));
+  EXPECT_TRUE(pool.isAcquired(valid_tile));
+
+  // 1. Separate TilePool instance tile
+  TilePool other_pool(16);
+  AdaptiveTile* foreign_tile = other_pool.acquireTile();
+  ASSERT_NE(foreign_tile, nullptr);
+  EXPECT_FALSE(pool.owns(foreign_tile));
+  EXPECT_FALSE(pool.isAcquired(foreign_tile));
+  EXPECT_FALSE(pool.releaseTile(foreign_tile));
+
+  // 2. Independent heap-allocated tile
+  auto heap_tile = std::make_unique<AdaptiveTile>();
+  EXPECT_FALSE(pool.owns(heap_tile.get()));
+  EXPECT_FALSE(pool.isAcquired(heap_tile.get()));
+  EXPECT_FALSE(pool.releaseTile(heap_tile.get()));
+
+  // 3. Stack-allocated tile
+  AdaptiveTile stack_tile;
+  EXPECT_FALSE(pool.owns(&stack_tile));
+  EXPECT_FALSE(pool.isAcquired(&stack_tile));
+  EXPECT_FALSE(pool.releaseTile(&stack_tile));
+
+  // 4. nullptr
+  EXPECT_FALSE(pool.owns(nullptr));
+  EXPECT_FALSE(pool.isAcquired(nullptr));
+  EXPECT_FALSE(pool.releaseTile(nullptr));
+
+  // Verify pool state remains completely unaffected by rejected foreign releases
+  EXPECT_EQ(pool.inUse(), 1u);
+  EXPECT_EQ(pool.freeCount(), 15u);
+  EXPECT_EQ(pool.capacity(), 16u);
+
+  // 5. Valid release succeeds
+  EXPECT_TRUE(pool.releaseTile(valid_tile));
+  EXPECT_EQ(pool.inUse(), 0u);
+  EXPECT_EQ(pool.freeCount(), 16u);
+}
+
 }  // namespace avr::mapping

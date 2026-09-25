@@ -39,8 +39,10 @@ class TilePool {
   /**
    * @brief Acquires a clean, reset AdaptiveTile from the pool.
    *
-   * If the free list is empty, a new block of block_capacity_ tiles is allocated.
-   * Acquired tiles are always reset and marked acquired before returning.
+   * Contract:
+   * - Returns a valid acquired tile pointer.
+   * - If the free list is empty, a new block of block_capacity_ tiles is allocated.
+   * - Acquired tiles are always reset and marked acquired before returning.
    */
   AdaptiveTile* acquireTile() {
     if (free_list_.empty()) {
@@ -57,8 +59,12 @@ class TilePool {
   /**
    * @brief Releases an active AdaptiveTile back to the pool for reuse.
    *
-   * Rejects nullptr, foreign pointers, and double-release of already-released tiles.
-   * Resets the tile state immediately upon release.
+   * Contract:
+   * - Releasing ptr invalidates the caller's ownership of ptr.
+   * - Callers must not access, read, or write to ptr after a successful release.
+   * - A released tile may later be reused and returned by a subsequent acquireTile() call.
+   * - Rejects nullptr, foreign pointers, and double-release of already-released tiles.
+   * - Resets the tile state immediately upon release.
    * @return true if successfully released, false if rejected (unowned, nullptr, or double release).
    */
   bool releaseTile(AdaptiveTile* tile) noexcept {
@@ -127,16 +133,19 @@ class TilePool {
 
   /**
    * @brief Validates if a tile pointer belongs to one of the allocated blocks.
+   *
+   * Uses standards-defined pointer equality between object pointers to ensure 100% portable
+   * ownership testing without relying on relational comparisons across unrelated heap allocations.
    */
   [[nodiscard]] bool owns(const AdaptiveTile* ptr) const noexcept {
     if (ptr == nullptr) {
       return false;
     }
     for (const auto& block : blocks_) {
-      const AdaptiveTile* start = block.get();
-      const AdaptiveTile* end = start + block_capacity_;
-      if (ptr >= start && ptr < end) {
-        return true;
+      for (size_t i = 0; i < block_capacity_; ++i) {
+        if (&block[i] == ptr) {
+          return true;
+        }
       }
     }
     return false;
