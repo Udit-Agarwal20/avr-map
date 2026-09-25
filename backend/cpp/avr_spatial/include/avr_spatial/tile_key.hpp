@@ -20,8 +20,8 @@ namespace avr::spatial {
  * @brief Computes 1D local tile index [0, 255] in row-major order: index = local_y * 16 + local_x.
  */
 [[nodiscard]] constexpr uint16_t localCellIndex(int32_t cx, int32_t cy) noexcept {
-  const int32_t tx = floorDivPositive(cx, static_cast<int32_t>(TILE_SIZE));
-  const int32_t ty = floorDivPositive(cy, static_cast<int32_t>(TILE_SIZE));
+  const int32_t tx = detail::floorDivPositive(cx, static_cast<int32_t>(TILE_SIZE));
+  const int32_t ty = detail::floorDivPositive(cy, static_cast<int32_t>(TILE_SIZE));
   const int64_t lx = static_cast<int64_t>(cx) - static_cast<int64_t>(tx) * static_cast<int64_t>(TILE_SIZE);
   const int64_t ly = static_cast<int64_t>(cy) - static_cast<int64_t>(ty) * static_cast<int64_t>(TILE_SIZE);
   return static_cast<uint16_t>(ly * TILE_SIZE + lx);
@@ -48,8 +48,8 @@ namespace avr::spatial {
 [[nodiscard]] constexpr TileCoord cellToTileCoord(const CellCoord& cell) noexcept {
   assert(isValidLevel(cell.level) && "cellToTileCoord requires valid level [0, 3]");
   return TileCoord{
-      .x = floorDivPositive(cell.x, static_cast<int32_t>(TILE_SIZE)),
-      .y = floorDivPositive(cell.y, static_cast<int32_t>(TILE_SIZE)),
+      .x = detail::floorDivPositive(cell.x, static_cast<int32_t>(TILE_SIZE)),
+      .y = detail::floorDivPositive(cell.y, static_cast<int32_t>(TILE_SIZE)),
       .level = cell.level,
   };
 }
@@ -117,8 +117,12 @@ struct TileKey {
   /**
    * @brief Returns physical metric bounds [min_x, max_x) x [min_y, max_y) for this entire 16x16 tile.
    */
-  [[nodiscard]] Bounds2D bounds(const WorldPoint2D& origin = {0.0, 0.0}) const noexcept {
+  [[nodiscard]] Bounds2D bounds(const GridOrigin2D& origin = GridOrigin2D{0, 0}) const noexcept {
     return tileBounds(decode(), origin);
+  }
+
+  [[nodiscard]] Bounds2D bounds(const WorldPoint2D& metric_origin) const noexcept {
+    return tileBounds(decode(), metric_origin);
   }
 };
 

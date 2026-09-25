@@ -59,7 +59,7 @@ struct CellKey {
    *        Returns std::nullopt if level is invalid, point is non-finite, or point is out-of-range.
    */
   [[nodiscard]] static std::optional<CellKey> fromWorldPoint(
-      const WorldPoint2D& pt, uint8_t level, const WorldPoint2D& origin = {0.0, 0.0}) noexcept {
+      const WorldPoint2D& pt, uint8_t level, const GridOrigin2D& origin = GridOrigin2D{0, 0}) noexcept {
     if (!isValidLevel(level)) [[unlikely]] {
       return std::nullopt;
     }
@@ -68,6 +68,15 @@ struct CellKey {
       return std::nullopt;
     }
     return fromCellCoord(*cell_coord);
+  }
+
+  [[nodiscard]] static std::optional<CellKey> fromWorldPoint(
+      const WorldPoint2D& pt, uint8_t level, const WorldPoint2D& metric_origin) noexcept {
+    const auto grid_origin = metricOriginToGridOrigin(metric_origin);
+    if (!grid_origin.has_value()) [[unlikely]] {
+      return std::nullopt;
+    }
+    return fromWorldPoint(pt, level, *grid_origin);
   }
 
   /**
@@ -81,10 +90,15 @@ struct CellKey {
   }
 
   /**
-   * @brief Computes physical metric bounds [min_x, max_x) x [min_y, max_y) for this cell.
+   * @brief Computes physical metric bounds [min_x, max_x) x [min_y, max_y) for this cell
+   *        relative to an integer GridOrigin2D (default: canonical GridOrigin2D{0, 0}).
    */
-  [[nodiscard]] Bounds2D bounds(const WorldPoint2D& origin = {0.0, 0.0}) const noexcept {
+  [[nodiscard]] Bounds2D bounds(const GridOrigin2D& origin = GridOrigin2D{0, 0}) const noexcept {
     return cellBounds(decode(), origin);
+  }
+
+  [[nodiscard]] Bounds2D bounds(const WorldPoint2D& metric_origin) const noexcept {
+    return cellBounds(decode(), metric_origin);
   }
 };
 
@@ -94,8 +108,8 @@ struct CellKey {
  * Contract:
  * - If cell is at the coarsest level (L3) or has an invalid level, returns std::nullopt.
  * - Parent coordinates are derived via exact integer floor division:
- *     px = floorDivPositive(cx, 2)
- *     py = floorDivPositive(cy, 2)
+ *     px = detail::floorDivPositive(cx, 2)
+ *     py = detail::floorDivPositive(cy, 2)
  * - Never overflows signed 32-bit integer.
  */
 [[nodiscard]] constexpr std::optional<CellKey> parentOf(const CellKey& key) noexcept {
@@ -103,8 +117,8 @@ struct CellKey {
     return std::nullopt;
   }
   const CellCoord coord = key.decode();
-  const int32_t px = floorDivPositive(coord.x, 2);
-  const int32_t py = floorDivPositive(coord.y, 2);
+  const int32_t px = detail::floorDivPositive(coord.x, 2);
+  const int32_t py = detail::floorDivPositive(coord.y, 2);
   return CellKey::fromCellCoord(CellCoord{
       .x = px,
       .y = py,

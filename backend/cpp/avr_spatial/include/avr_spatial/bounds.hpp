@@ -51,21 +51,22 @@ struct Bounds2D {
  * to prevent signed integer overflow at INT32_MAX.
  */
 [[nodiscard]] inline Bounds2D cellBounds(
-    const CellCoord& cell, const WorldPoint2D& origin = {0.0, 0.0}) noexcept {
+    const CellCoord& cell, const GridOrigin2D& origin = GridOrigin2D{0, 0}) noexcept {
   const double cpm = cellsPerMeter(cell.level);
   if (cpm <= 0.0) [[unlikely]] {
-    return Bounds2D{
-        .min_x = origin.x,
-        .min_y = origin.y,
-        .max_x = origin.x,
-        .max_y = origin.y,
-    };
+    const double ox = static_cast<double>(origin.x) / BASE_CELLS_PER_METER;
+    const double oy = static_cast<double>(origin.y) / BASE_CELLS_PER_METER;
+    return Bounds2D{.min_x = ox, .min_y = oy, .max_x = ox, .max_y = oy};
   }
 
-  const double min_x = origin.x + static_cast<double>(cell.x) / cpm;
-  const double min_y = origin.y + static_cast<double>(cell.y) / cpm;
-  const double max_x = origin.x + static_cast<double>(static_cast<int64_t>(cell.x) + 1) / cpm;
-  const double max_y = origin.y + static_cast<double>(static_cast<int64_t>(cell.y) + 1) / cpm;
+  const int64_t scale = static_cast<int64_t>(levelScale(cell.level));
+  const int64_t global_base_x = static_cast<int64_t>(cell.x) * scale + static_cast<int64_t>(origin.x);
+  const int64_t global_base_y = static_cast<int64_t>(cell.y) * scale + static_cast<int64_t>(origin.y);
+
+  const double min_x = static_cast<double>(global_base_x) / BASE_CELLS_PER_METER;
+  const double min_y = static_cast<double>(global_base_y) / BASE_CELLS_PER_METER;
+  const double max_x = static_cast<double>(global_base_x + scale) / BASE_CELLS_PER_METER;
+  const double max_y = static_cast<double>(global_base_y + scale) / BASE_CELLS_PER_METER;
 
   return Bounds2D{
       .min_x = min_x,
@@ -75,37 +76,57 @@ struct Bounds2D {
   };
 }
 
-/**
- * @brief Computes physical metric bounds for a cell, returning std::nullopt if level is invalid.
- */
+[[nodiscard]] inline Bounds2D cellBounds(
+    const CellCoord& cell, const WorldPoint2D& metric_origin) noexcept {
+  const auto grid_origin = metricOriginToGridOrigin(metric_origin);
+  if (grid_origin.has_value()) {
+    return cellBounds(cell, *grid_origin);
+  }
+  const double cpm = cellsPerMeter(cell.level);
+  if (cpm <= 0.0) [[unlikely]] {
+    return Bounds2D{.min_x = metric_origin.x, .min_y = metric_origin.y, .max_x = metric_origin.x, .max_y = metric_origin.y};
+  }
+  const double min_x = metric_origin.x + static_cast<double>(cell.x) / cpm;
+  const double min_y = metric_origin.y + static_cast<double>(cell.y) / cpm;
+  const double max_x = metric_origin.x + static_cast<double>(static_cast<int64_t>(cell.x) + 1) / cpm;
+  const double max_y = metric_origin.y + static_cast<double>(static_cast<int64_t>(cell.y) + 1) / cpm;
+  return Bounds2D{.min_x = min_x, .min_y = min_y, .max_x = max_x, .max_y = max_y};
+}
+
 [[nodiscard]] inline std::optional<Bounds2D> cellBoundsSafe(
-    const CellCoord& cell, const WorldPoint2D& origin = {0.0, 0.0}) noexcept {
+    const CellCoord& cell, const GridOrigin2D& origin = GridOrigin2D{0, 0}) noexcept {
   if (!isValidLevel(cell.level)) [[unlikely]] {
     return std::nullopt;
   }
   return cellBounds(cell, origin);
 }
 
-/**
- * @brief Computes exact physical metric bounds for a 16x16 tile at a given level.
- */
+[[nodiscard]] inline std::optional<Bounds2D> cellBoundsSafe(
+    const CellCoord& cell, const WorldPoint2D& metric_origin) noexcept {
+  if (!isValidLevel(cell.level)) [[unlikely]] {
+    return std::nullopt;
+  }
+  return cellBounds(cell, metric_origin);
+}
+
 [[nodiscard]] inline Bounds2D tileBounds(
-    const TileCoord& tile, const WorldPoint2D& origin = {0.0, 0.0}) noexcept {
+    const TileCoord& tile, const GridOrigin2D& origin = GridOrigin2D{0, 0}) noexcept {
   const double cpm = cellsPerMeter(tile.level);
   if (cpm <= 0.0) [[unlikely]] {
-    return Bounds2D{
-        .min_x = origin.x,
-        .min_y = origin.y,
-        .max_x = origin.x,
-        .max_y = origin.y,
-    };
+    const double ox = static_cast<double>(origin.x) / BASE_CELLS_PER_METER;
+    const double oy = static_cast<double>(origin.y) / BASE_CELLS_PER_METER;
+    return Bounds2D{.min_x = ox, .min_y = oy, .max_x = ox, .max_y = oy};
   }
 
-  const double tile_span = static_cast<double>(TILE_SIZE) / cpm;
-  const double min_x = origin.x + static_cast<double>(tile.x) * tile_span;
-  const double min_y = origin.y + static_cast<double>(tile.y) * tile_span;
-  const double max_x = origin.x + static_cast<double>(static_cast<int64_t>(tile.x) + 1) * tile_span;
-  const double max_y = origin.y + static_cast<double>(static_cast<int64_t>(tile.y) + 1) * tile_span;
+  const int64_t scale = static_cast<int64_t>(levelScale(tile.level));
+  const int64_t tile_cells = static_cast<int64_t>(TILE_SIZE) * scale;
+  const int64_t global_base_x = static_cast<int64_t>(tile.x) * tile_cells + static_cast<int64_t>(origin.x);
+  const int64_t global_base_y = static_cast<int64_t>(tile.y) * tile_cells + static_cast<int64_t>(origin.y);
+
+  const double min_x = static_cast<double>(global_base_x) / BASE_CELLS_PER_METER;
+  const double min_y = static_cast<double>(global_base_y) / BASE_CELLS_PER_METER;
+  const double max_x = static_cast<double>(global_base_x + tile_cells) / BASE_CELLS_PER_METER;
+  const double max_y = static_cast<double>(global_base_y + tile_cells) / BASE_CELLS_PER_METER;
 
   return Bounds2D{
       .min_x = min_x,
@@ -115,15 +136,38 @@ struct Bounds2D {
   };
 }
 
-/**
- * @brief Computes physical metric bounds for a tile, returning std::nullopt if level is invalid.
- */
+[[nodiscard]] inline Bounds2D tileBounds(
+    const TileCoord& tile, const WorldPoint2D& metric_origin) noexcept {
+  const auto grid_origin = metricOriginToGridOrigin(metric_origin);
+  if (grid_origin.has_value()) {
+    return tileBounds(tile, *grid_origin);
+  }
+  const double cpm = cellsPerMeter(tile.level);
+  if (cpm <= 0.0) [[unlikely]] {
+    return Bounds2D{.min_x = metric_origin.x, .min_y = metric_origin.y, .max_x = metric_origin.x, .max_y = metric_origin.y};
+  }
+  const double tile_span = static_cast<double>(TILE_SIZE) / cpm;
+  const double min_x = metric_origin.x + static_cast<double>(tile.x) * tile_span;
+  const double min_y = metric_origin.y + static_cast<double>(tile.y) * tile_span;
+  const double max_x = metric_origin.x + static_cast<double>(static_cast<int64_t>(tile.x) + 1) * tile_span;
+  const double max_y = metric_origin.y + static_cast<double>(static_cast<int64_t>(tile.y) + 1) * tile_span;
+  return Bounds2D{.min_x = min_x, .min_y = min_y, .max_x = max_x, .max_y = max_y};
+}
+
 [[nodiscard]] inline std::optional<Bounds2D> tileBoundsSafe(
-    const TileCoord& tile, const WorldPoint2D& origin = {0.0, 0.0}) noexcept {
+    const TileCoord& tile, const GridOrigin2D& origin = GridOrigin2D{0, 0}) noexcept {
   if (!isValidLevel(tile.level)) [[unlikely]] {
     return std::nullopt;
   }
   return tileBounds(tile, origin);
+}
+
+[[nodiscard]] inline std::optional<Bounds2D> tileBoundsSafe(
+    const TileCoord& tile, const WorldPoint2D& metric_origin) noexcept {
+  if (!isValidLevel(tile.level)) [[unlikely]] {
+    return std::nullopt;
+  }
+  return tileBounds(tile, metric_origin);
 }
 
 }  // namespace avr::spatial

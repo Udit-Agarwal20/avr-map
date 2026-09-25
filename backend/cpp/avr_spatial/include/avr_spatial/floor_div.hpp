@@ -60,23 +60,25 @@ template <std::integral T>
   return floorDivSafe(a, b);
 }
 
+namespace detail {
+
 /**
  * @brief High-performance hierarchy-oriented floor division for strictly positive divisors (b > 0).
  *
  * Contract:
  * - Precondition: b > 0.
- * - When b > 0, signed division overflow is mathematically impossible for all two's complement
- *   values of a (including INT_MIN / 1 == INT_MIN and INT_MIN / 2 == INT_MIN / 2).
+ * - Used exclusively in internal spatial math where divisors are verified compile-time constants
+ *   or validated dyadic scales (1, 2, 4, 8, 16).
  * - In debug mode: asserts b > 0.
- * - In release mode: defensive fallback prevents hardware trap or undefined behavior.
- *
- * Used in hot spatial loops where divisors are known dyadic scales (1, 2, 4, 8) or tile spans (16).
+ * - In release mode: defensive fallback avoids division-by-zero UB without returning a deceptive
+ *   valid coordinate.
+ * - NOT part of the public spatial API. Public callers must use floorDiv / floorDivSafe.
  */
 template <std::integral T>
 [[nodiscard]] constexpr T floorDivPositive(T a, T b) noexcept {
   assert(b > 0 && "floorDivPositive requires strictly positive divisor (b > 0)");
   if (b <= 0) [[unlikely]] {
-    return 0;  // Defensive release fallback: zero UB
+    return std::numeric_limits<T>::min();
   }
 
   T q = a / b;
@@ -88,6 +90,8 @@ template <std::integral T>
 
   return q;
 }
+
+}  // namespace detail
 
 }  // namespace avr::spatial
 

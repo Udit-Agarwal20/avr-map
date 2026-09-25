@@ -392,5 +392,167 @@ TEST(QuantizationTest, OriginValidation) {
       std::nullopt);
 }
 
+TEST(QuantizationTest, MetricOriginConversionValidAligned) {
+  // Required aligned metric origins: 0.0, 0.05, -0.05, 0.10, -0.10, 1.0, -1.0, 123.45, -987.65
+  const struct TestCase {
+    double metric;
+    int32_t expected_cell;
+  } cases[] = {
+      {0.0, 0},
+      {0.05, 1},
+      {-0.05, -1},
+      {0.10, 2},
+      {-0.10, -2},
+      {1.0, 20},
+      {-1.0, -20},
+      {123.45, 2469},
+      {-987.65, -19753},
+  };
+
+  for (const auto& tc : cases) {
+    const auto cell_opt = metricOriginToGridCell(tc.metric);
+    ASSERT_TRUE(cell_opt.has_value()) << "Failed for aligned origin: " << tc.metric;
+    EXPECT_EQ(*cell_opt, tc.expected_cell);
+
+    const auto origin_opt = metricOriginToGridOrigin(WorldPoint2D{.x = tc.metric, .y = tc.metric});
+    ASSERT_TRUE(origin_opt.has_value());
+    EXPECT_EQ(origin_opt->x, tc.expected_cell);
+    EXPECT_EQ(origin_opt->y, tc.expected_cell);
+  }
+}
+
+TEST(QuantizationTest, MetricOriginConversionInvalidNonAligned) {
+  // Required non-aligned origins: 0.01, 0.02, 0.033, 0.049, 0.051, 1.001, -0.014, -0.049, -0.051
+  const double non_aligned[] = {
+      0.01, 0.02, 0.033, 0.049, 0.051, 1.001, -0.014, -0.049, -0.051,
+  };
+
+  for (double origin : non_aligned) {
+    EXPECT_EQ(metricOriginToGridCell(origin), std::nullopt)
+        << "Non-aligned origin did not fail: " << origin;
+
+    EXPECT_EQ(metricOriginToGridOrigin(WorldPoint2D{.x = origin, .y = 0.0}), std::nullopt);
+    EXPECT_EQ(metricOriginToGridOrigin(WorldPoint2D{.x = 0.0, .y = origin}), std::nullopt);
+    EXPECT_EQ(metricOriginToGridOrigin(WorldPoint2D{.x = origin, .y = origin}), std::nullopt);
+
+    // Public quantize/worldToGrid overloads with metric origin must reject non-aligned origin
+    EXPECT_EQ(quantizeToBaseGrid(1.0, origin), std::nullopt);
+    EXPECT_EQ(quantizeToBaseGridSafe(1.0, origin), std::nullopt);
+    EXPECT_EQ(worldToGridCoord(WorldPoint2D{.x = 1.0, .y = 1.0}, WorldPoint2D{.x = origin, .y = 0.0}),
+              std::nullopt);
+    EXPECT_EQ(worldToCellCoord(WorldPoint2D{.x = 1.0, .y = 1.0}, L0, WorldPoint2D{.x = 0.0, .y = origin}),
+              std::nullopt);
+    EXPECT_EQ(
+        CellKey::fromWorldPoint(WorldPoint2D{.x = 1.0, .y = 1.0}, L0, WorldPoint2D{.x = origin, .y = origin}),
+        std::nullopt);
+  }
+}
+
+TEST(QuantizationTest, IntegerOriginCheckedArithmeticOffsets) {
+  // Offsets: 0, 1, -1, 17, -17, 100000, -100000
+  const int32_t offsets[] = {0, 1, -1, 17, -17, 100000, -100000};
+  const double test_worlds[] = {-15.2, -1.0, -0.05, 0.0, 0.05, 2.5, 50.0};
+
+  for (int32_t offset : offsets) {
+    const GridOrigin2D origin{.x = offset, .y = offset};
+    for (double w : test_worlds) {
+      const auto global_base = quantizeToBaseGridSafe(w);
+      ASSERT_TRUE(global_base.has_value());
+
+      // Checked offset
+      const auto local_base = checkedCellOffset(*global_base, offset);
+      ASSERT_TRUE(local_base.has_value());
+      EXPECT_EQ(*local_base, *global_base - offset);
+
+      // Quantize with integer origin
+      const auto q_int = quantizeToBaseGridSafe(w, offset);
+      ASSERT_TRUE(q_int.has_value());
+      EXPECT_EQ(*q_int, *local_base);
+
+      // 2D worldToGridCoord with GridOrigin2D
+      const auto g_2d = worldToGridCoord(WorldPoint2D{.x = w, .y = w}, origin);
+      ASSERT_TRUE(g_2d.has_value());
+      EXPECT_EQ(g_2d->x, *local_base);
+      EXPECT_EQ(g_2d->y, *local_base);
+    }
+  }
+}
+
+TEST(QuantizationTest, ExtremeOriginArithmetic) {
+  // global_cell - origin_cell near INT32_MIN and INT32_MAX
+  // Underflow: INT32_MIN - 1
+  EXPECT_EQ(checkedCellOffset(std::numeric_limits<int32_t>::min(), 1), std::nullopt);
+
+  // Overflow: INT32_MAX - (-1)
+  EXPECT_EQ(checkedCellOffset(std::numeric_limits<int32_t>::max(), -1), std::nullopt);
+
+  // Extreme underflow: INT32_MIN - INT32_MAX
+  EXPECT_EQ(checkedCellOffset(std::numeric_limits<int32_t>::min(), std::numeric_limits<int32_t>::max()),
+            std::nullopt);
+
+  // Extreme overflow: INT32_MAX - INT32_MIN
+  EXPECT_EQ(checkedCellOffset(std::numeric_limits<int32_t>::max(), std::numeric_limits<int32_t>::min()),
+            std::nullopt);
+
+  // Representable boundaries
+  EXPECT_EQ(checkedCellOffset(std::numeric_limits<int32_t>::max(), 0),
+            std::numeric_limits<int32_t>::max());
+  EXPECT_EQ(checkedCellOffset(std::numeric_limits<int32_t>::min(), 0),
+            std::numeric_limits<int32_t>::min());
+  EXPECT_EQ(checkedCellOffset(0, std::numeric_limits<int32_t>::max()),
+            -std::numeric_limits<int32_t>::max());
+  EXPECT_EQ(checkedCellOffset(std::numeric_limits<int32_t>::max(), std::numeric_limits<int32_t>::max()), 0);
+  EXPECT_EQ(checkedCellOffset(std::numeric_limits<int32_t>::min(), std::numeric_limits<int32_t>::min()), 0);
+  EXPECT_EQ(checkedCellOffset(std::numeric_limits<int32_t>::min() + 1, 1),
+            std::numeric_limits<int32_t>::min());
+  EXPECT_EQ(checkedCellOffset(std::numeric_limits<int32_t>::max() - 1, -1),
+            std::numeric_limits<int32_t>::max());
+
+  // Failures through public quantization API when origin offset causes overflow
+  EXPECT_EQ(quantizeToBaseGridSafe(0.0, std::numeric_limits<int32_t>::min()), std::nullopt);
+}
+
+TEST(QuantizationTest, CanonicalMapRequirementAround100m) {
+  // AVR canonical map origin = GridOrigin2D{0, 0}
+  const GridOrigin2D canonical_origin = GridOrigin2D::canonical();
+  EXPECT_EQ(canonical_origin.x, 0);
+  EXPECT_EQ(canonical_origin.y, 0);
+
+  // World coordinates around -100 m, 0 m, +100 m
+  // -100.0 m -> expected base cell -2000
+  //    0.0 m -> expected base cell 0
+  // +100.0 m -> expected base cell +2000
+  const struct TestCase {
+    double coord;
+    int32_t expected_cell;
+  } cases[] = {
+      {-100.0, -2000},
+      {0.0, 0},
+      {100.0, 2000},
+  };
+
+  for (const auto& tc : cases) {
+    // Exact coordinate
+    const auto q_exact = worldToGridCoord(WorldPoint2D{.x = tc.coord, .y = tc.coord}, canonical_origin);
+    ASSERT_TRUE(q_exact.has_value());
+    EXPECT_EQ(q_exact->x, tc.expected_cell);
+    EXPECT_EQ(q_exact->y, tc.expected_cell);
+
+    // Immediately above boundary -> expected_cell
+    const double above = std::nextafter(tc.coord, std::numeric_limits<double>::infinity());
+    const auto q_above = worldToGridCoord(WorldPoint2D{.x = above, .y = above}, canonical_origin);
+    ASSERT_TRUE(q_above.has_value());
+    EXPECT_EQ(q_above->x, tc.expected_cell);
+    EXPECT_EQ(q_above->y, tc.expected_cell);
+
+    // Immediately below boundary -> expected_cell - 1
+    const double below = std::nextafter(tc.coord, -std::numeric_limits<double>::infinity());
+    const auto q_below = worldToGridCoord(WorldPoint2D{.x = below, .y = below}, canonical_origin);
+    ASSERT_TRUE(q_below.has_value());
+    EXPECT_EQ(q_below->x, tc.expected_cell - 1);
+    EXPECT_EQ(q_below->y, tc.expected_cell - 1);
+  }
+}
+
 }  // namespace avr::spatial
 

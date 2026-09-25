@@ -12,16 +12,16 @@ TEST(FloorDivTest, RequiredPromptExamples) {
   // Positive numerator, positive divisor
   EXPECT_EQ(floorDiv(5, 2), 2);
   EXPECT_EQ(floorDiv(4, 2), 2);
-  EXPECT_EQ(floorDivPositive(5, 2), 2);
-  EXPECT_EQ(floorDivPositive(4, 2), 2);
+  EXPECT_EQ(detail::floorDivPositive(5, 2), 2);
+  EXPECT_EQ(detail::floorDivPositive(4, 2), 2);
 
   // Negative numerator, positive divisor
   EXPECT_EQ(floorDiv(-1, 2), -1);
   EXPECT_EQ(floorDiv(-2, 2), -1);
   EXPECT_EQ(floorDiv(-3, 2), -2);
-  EXPECT_EQ(floorDivPositive(-1, 2), -1);
-  EXPECT_EQ(floorDivPositive(-2, 2), -1);
-  EXPECT_EQ(floorDivPositive(-3, 2), -2);
+  EXPECT_EQ(detail::floorDivPositive(-1, 2), -1);
+  EXPECT_EQ(detail::floorDivPositive(-2, 2), -1);
+  EXPECT_EQ(detail::floorDivPositive(-3, 2), -2);
 
   // Positive numerator, negative divisor
   EXPECT_EQ(floorDiv(1, -2), -1);
@@ -36,25 +36,25 @@ TEST(FloorDivTest, PowersOfTwoDivisors) {
   EXPECT_EQ(floorDiv(7, 2), 3);
   EXPECT_EQ(floorDiv(-1, 2), -1);
   EXPECT_EQ(floorDiv(-9, 2), -5);
-  EXPECT_EQ(floorDivPositive(7, 2), 3);
-  EXPECT_EQ(floorDivPositive(-1, 2), -1);
-  EXPECT_EQ(floorDivPositive(-9, 2), -5);
+  EXPECT_EQ(detail::floorDivPositive(7, 2), 3);
+  EXPECT_EQ(detail::floorDivPositive(-1, 2), -1);
+  EXPECT_EQ(detail::floorDivPositive(-9, 2), -5);
 
   // Level 2: divisor 4
   EXPECT_EQ(floorDiv(7, 4), 1);
   EXPECT_EQ(floorDiv(-1, 4), -1);
   EXPECT_EQ(floorDiv(-9, 4), -3);
-  EXPECT_EQ(floorDivPositive(7, 4), 1);
-  EXPECT_EQ(floorDivPositive(-1, 4), -1);
-  EXPECT_EQ(floorDivPositive(-9, 4), -3);
+  EXPECT_EQ(detail::floorDivPositive(7, 4), 1);
+  EXPECT_EQ(detail::floorDivPositive(-1, 4), -1);
+  EXPECT_EQ(detail::floorDivPositive(-9, 4), -3);
 
   // Level 3: divisor 8
   EXPECT_EQ(floorDiv(7, 8), 0);
   EXPECT_EQ(floorDiv(-1, 8), -1);
   EXPECT_EQ(floorDiv(-9, 8), -2);
-  EXPECT_EQ(floorDivPositive(7, 8), 0);
-  EXPECT_EQ(floorDivPositive(-1, 8), -1);
-  EXPECT_EQ(floorDivPositive(-9, 8), -2);
+  EXPECT_EQ(detail::floorDivPositive(7, 8), 0);
+  EXPECT_EQ(detail::floorDivPositive(-1, 8), -1);
+  EXPECT_EQ(detail::floorDivPositive(-9, 8), -2);
 
   // Tile dimension: divisor 16
   EXPECT_EQ(floorDiv(15, 16), 0);
@@ -62,11 +62,11 @@ TEST(FloorDivTest, PowersOfTwoDivisors) {
   EXPECT_EQ(floorDiv(-1, 16), -1);
   EXPECT_EQ(floorDiv(-16, 16), -1);
   EXPECT_EQ(floorDiv(-17, 16), -2);
-  EXPECT_EQ(floorDivPositive(15, 16), 0);
-  EXPECT_EQ(floorDivPositive(16, 16), 1);
-  EXPECT_EQ(floorDivPositive(-1, 16), -1);
-  EXPECT_EQ(floorDivPositive(-16, 16), -1);
-  EXPECT_EQ(floorDivPositive(-17, 16), -2);
+  EXPECT_EQ(detail::floorDivPositive(15, 16), 0);
+  EXPECT_EQ(detail::floorDivPositive(16, 16), 1);
+  EXPECT_EQ(detail::floorDivPositive(-1, 16), -1);
+  EXPECT_EQ(detail::floorDivPositive(-16, 16), -1);
+  EXPECT_EQ(detail::floorDivPositive(-17, 16), -2);
 }
 
 TEST(FloorDivTest, ZeroDivisionReturnsNullopt) {
@@ -96,13 +96,13 @@ TEST(FloorDivTest, MinSignedDivisionOverflowReturnsNullopt) {
 TEST(FloorDivTest, ExtremeValues) {
   EXPECT_EQ(floorDiv(INT32_MAX, 1), INT32_MAX);
   EXPECT_EQ(floorDiv(INT32_MIN, 1), INT32_MIN);
-  EXPECT_EQ(floorDivPositive(INT32_MAX, 1), INT32_MAX);
-  EXPECT_EQ(floorDivPositive(INT32_MIN, 1), INT32_MIN);
+  EXPECT_EQ(detail::floorDivPositive(INT32_MAX, 1), INT32_MAX);
+  EXPECT_EQ(detail::floorDivPositive(INT32_MIN, 1), INT32_MIN);
 
   EXPECT_EQ(floorDiv(INT32_MAX, 2), INT32_MAX / 2);
   EXPECT_EQ(floorDiv(INT32_MIN, 2), INT32_MIN / 2);
-  EXPECT_EQ(floorDivPositive(INT32_MAX, 2), INT32_MAX / 2);
-  EXPECT_EQ(floorDivPositive(INT32_MIN, 2), INT32_MIN / 2);
+  EXPECT_EQ(detail::floorDivPositive(INT32_MAX, 2), INT32_MAX / 2);
+  EXPECT_EQ(detail::floorDivPositive(INT32_MIN, 2), INT32_MIN / 2);
 
   // INT32_MAX / -1 is representable: -INT32_MAX
   EXPECT_EQ(floorDiv(INT32_MAX, -1), -INT32_MAX);
@@ -111,8 +111,8 @@ TEST(FloorDivTest, ExtremeValues) {
   // 64-bit types
   EXPECT_EQ(floorDiv<int64_t>(-1LL, 2LL), -1LL);
   EXPECT_EQ(floorDiv<int64_t>(-100LL, 16LL), -7LL);
-  EXPECT_EQ(floorDivPositive<int64_t>(-1LL, 2LL), -1LL);
-  EXPECT_EQ(floorDivPositive<int64_t>(-100LL, 16LL), -7LL);
+  EXPECT_EQ(detail::floorDivPositive<int64_t>(-1LL, 2LL), -1LL);
+  EXPECT_EQ(detail::floorDivPositive<int64_t>(-100LL, 16LL), -7LL);
 }
 
 }  // namespace avr::spatial
