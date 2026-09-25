@@ -2,6 +2,7 @@
 
 #include <limits>
 #include <optional>
+#include <type_traits>
 #include <unordered_set>
 
 #include "avr_spatial/cell_key.hpp"
@@ -157,6 +158,15 @@ TEST(TileKeyTest, HashInUnorderedSet) {
   EXPECT_EQ(set.size(), 2U);
   EXPECT_TRUE(set.contains(*t1));
   EXPECT_TRUE(set.contains(*t2));
+}
+
+TEST(TileKeyTest, MemoryLayoutAndAlignment) {
+  // Empirically verified under AppleClang 21.0.0 / Clang 18+ / GCC 13+ (64-bit systems)
+  // uint64_t morton (8 bytes) + uint8_t level (1 byte) + 7 bytes natural tail padding = 16 bytes.
+  EXPECT_EQ(sizeof(TileKey), 16U);
+  EXPECT_EQ(alignof(TileKey), 8U);
+  EXPECT_TRUE(std::is_trivially_copyable_v<TileKey>);
+  EXPECT_TRUE(std::is_standard_layout_v<TileKey>);
 }
 
 }  // namespace avr::spatial

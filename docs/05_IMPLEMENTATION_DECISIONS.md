@@ -78,3 +78,19 @@ This document records architectural and implementation decisions for the **AVR-M
 - **Decision**: The existing four specification files in `/docs` remain immutable sources of truth. Any necessary implementation details, configuration refinements, or operational decisions that arise during engineering must be documented in this Implementation Decisions log (`05_IMPLEMENTATION_DECISIONS.md`) rather than editing or overwriting the original PDFs.
 - **Reason**: Preserves project requirement provenance and provides clear traceability for judges and reviewers.
 - **Consequences**: All team members and coding agents must respect the original specifications as authoritative and check this log for active implementation refinements.
+
+---
+
+## ADR-007: Canonical Integer-Aligned Grid Origin, Key Layout, and Rejection of Fuzzy Boundary Snapping
+
+- **Status**: Accepted
+- **Context**: Milestone 1.0 and 1.1 investigated floating-point quantization behavior for non-zero origins. In Milestone 1.1, machine-precision boundary snapping tolerance (`ulp_bound = 4 * (|coord| + |origin|) * 20 * epsilon`) was introduced to bridge floating-point addition cancellation for non-zero double origins. An audit in Milestone 1.2 revealed that any fuzzy snapping tolerance creates a non-zero tolerance envelope that snaps legitimate representable floating-point values strictly below a cell boundary (`std::nextafter(boundary, -infinity)`) into the upper cell, directly violating the mathematical invariant that cell ownership is strictly half-open $[min, max)$. Furthermore, the memory layout of `CellKey` and `TileKey` required empirical verification.
+- **Decision**:
+  1. **Strict Half-Open Ownership**: Revert and permanently reject fuzzy boundary snapping tolerances. Spatial quantization in AVR-Map strictly follows exact mathematical floor division $[min, max)$:
+     $$\text{quantizeToBaseGrid}(x) = \lfloor x \times \text{BASE\_CELLS\_PER\_METER} \rfloor$$
+     Every representable floating-point coordinate strictly less than a boundary $B$ remains in the previous cell; $B$ belongs to the intended cell.
+  2. **Canonical Origin Anchoring**: The canonical AVR-Map grid is permanently anchored to the `odom` frame origin $(0.0, 0.0)$. In the canonical frame, all dyadic boundaries $k \times 0.05$ have bit-for-bit exact half-open boundaries without cancellation.
+  3. **Integer-Aligned Grid Shifts**: Submaps, rolling local windows, and grid shifts are represented as discrete integer base-cell offsets $(ox, oy)$ on the canonical grid. Relative cell coordinates are computed via exact integer subtraction $(gx - ox, gy - oy)$, eliminating floating-point origin subtraction cancellation. When a double origin is passed to the public spatial API, it is aligned to the canonical base grid via $\text{round}(origin \times \text{BASE\_CELLS\_PER\_METER})$.
+  4. **Key Memory Layout**: Verify and accept that `CellKey` and `TileKey` have natural 8-byte alignment (`alignof = 8`) and a total size of 16 bytes (`sizeof = 16`, composed of 8-byte `uint64_t morton` + 1-byte `uint8_t level` + 7 bytes alignment padding). Neither struct shall be artificially packed (`#pragma pack` or `__attribute__((packed))`). Natural alignment provides optimal cacheline alignment (4 keys per 64-byte L1 cacheline), avoids unaligned hardware access penalties, and maintains `std::is_trivially_copyable_v<CellKey> == true`.
+- **Reason**: Preserves mathematical integrity of spatial partitioning, eliminates fuzzy boundary edge cases, and optimizes CPU-side hot path memory access without premature or unsafe packing.
+- **Consequences**: Map scrolling must advance in discrete integer base-cell / tile increments rather than continuous floating-point translations.

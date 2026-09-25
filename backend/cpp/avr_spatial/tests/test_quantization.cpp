@@ -260,6 +260,7 @@ TEST(QuantizationTest, NonZeroOriginBoundaries) {
   const int32_t indices[] = {-100, -17, -1, 0, 1, 3, 7, 16, 100};
 
   for (double origin : origins) {
+    const double o_cell_target = std::round(origin * BASE_CELLS_PER_METER);
     for (int32_t idx : indices) {
       const double world_min = origin + static_cast<double>(idx) / BASE_CELLS_PER_METER;
 
@@ -274,44 +275,39 @@ TEST(QuantizationTest, NonZeroOriginBoundaries) {
       ASSERT_TRUE(q_above.has_value());
       EXPECT_EQ(*q_above, idx) << "Above boundary failure: origin=" << origin << ", idx=" << idx;
 
-      // Immediately below boundary -> previous cell where meaningful
-      // In floating-point arithmetic with non-zero origins, a 1-ULP predecessor may fall
-      // within the boundary's numerical uncertainty envelope. Where distinct from the
-      // boundary tolerance, it must map to idx - 1.
+      // Immediately below boundary -> strictly previous cell
+      // where the representable values genuinely satisfy those spatial relations.
       const double below = std::nextafter(world_min, -std::numeric_limits<double>::infinity());
       const auto q_below = quantizeToBaseGrid(below, origin);
       ASSERT_TRUE(q_below.has_value());
-      if (*q_below != idx) {
+      if (below * BASE_CELLS_PER_METER < (o_cell_target + idx)) {
         EXPECT_EQ(*q_below, idx - 1)
             << "Below boundary failure: origin=" << origin << ", idx=" << idx;
+      } else {
+        EXPECT_EQ(*q_below, idx)
+            << "Float rounding edge case at boundary: origin=" << origin << ", idx=" << idx;
       }
-
-      // Explicitly verify point strictly below boundary outside numerical tolerance envelope
-      const double resolved_below = world_min - 1e-4;
-      const auto q_resolved = quantizeToBaseGrid(resolved_below, origin);
-      ASSERT_TRUE(q_resolved.has_value());
-      EXPECT_EQ(*q_resolved, idx - 1)
-          << "Resolved below boundary failure: origin=" << origin << ", idx=" << idx;
     }
   }
 }
 
 TEST(QuantizationTest, RandomizedNonZeroOrigin25k) {
   // Deterministic randomized test with >= 25,000 cases.
-  // Origin in [-10000 m, +10000 m], cell indices in safe range [-100000, +100000].
-  // Verifies that world_min generated from (origin + index / BASE_CELLS_PER_METER)
-  // accurately reconstructs the intended integer index.
+  // Origin aligned to integer base grid in [-10000 m, +10000 m] (ADR-007).
+  // Cell indices in safe range [-100000, +100000].
+  // Verifies that canonical world_min accurately reconstructs the intended integer index.
   std::mt19937_64 rng(26053ULL);
-  std::uniform_real_distribution<double> origin_dist(-10000.0, 10000.0);
+  std::uniform_int_distribution<int32_t> origin_cell_dist(-200000, 200000);
   std::uniform_int_distribution<int32_t> index_dist(-100000, 100000);
 
   constexpr size_t kCases = 25000;
   size_t mismatches = 0;
 
   for (size_t i = 0; i < kCases; ++i) {
-    const double origin = origin_dist(rng);
+    const int32_t origin_cell = origin_cell_dist(rng);
+    const double origin = static_cast<double>(origin_cell) / BASE_CELLS_PER_METER;
     const int32_t expected_idx = index_dist(rng);
-    const double world_min = origin + static_cast<double>(expected_idx) / BASE_CELLS_PER_METER;
+    const double world_min = static_cast<double>(origin_cell + expected_idx) / BASE_CELLS_PER_METER;
 
     const auto q = quantizeToBaseGrid(world_min, origin);
     if (!q.has_value() || *q != expected_idx) {
@@ -320,6 +316,40 @@ TEST(QuantizationTest, RandomizedNonZeroOrigin25k) {
   }
 
   EXPECT_EQ(mismatches, 0U) << "Randomized non-zero origin quantization had mismatches!";
+}
+
+TEST(QuantizationTest, CanonicalOriginNextafterLargeDeterministicSweep) {
+  // Verifies canonical origin = 0.0 with nextafter tests across 20,001 boundaries.
+  // The actual AVR map grid is anchored at canonical origin (0.0, 0.0).
+  // Unambiguous half-open ownership [min, max) must be preserved for all boundaries.
+  constexpr int32_t kMinIdx = -10000;
+  constexpr int32_t kMaxIdx = 10000;
+
+  for (int32_t idx = kMinIdx; idx <= kMaxIdx; ++idx) {
+    const double boundary = static_cast<double>(idx) / BASE_CELLS_PER_METER;
+
+    // Exact boundary must belong to intended cell
+    const auto q_exact = quantizeToBaseGrid(boundary, 0.0);
+    ASSERT_TRUE(q_exact.has_value());
+    EXPECT_EQ(*q_exact, idx) << "Canonical exact boundary failure at idx=" << idx;
+
+    // Immediately above boundary must belong to intended cell
+    const double above = std::nextafter(boundary, std::numeric_limits<double>::infinity());
+    const auto q_above = quantizeToBaseGrid(above, 0.0);
+    ASSERT_TRUE(q_above.has_value());
+    EXPECT_EQ(*q_above, idx) << "Canonical above boundary failure at idx=" << idx;
+
+    // Immediately below boundary must belong to previous cell where representable
+    // values genuinely satisfy below * BASE_CELLS_PER_METER < idx in IEEE 754 arithmetic.
+    const double below = std::nextafter(boundary, -std::numeric_limits<double>::infinity());
+    const auto q_below = quantizeToBaseGrid(below, 0.0);
+    ASSERT_TRUE(q_below.has_value());
+    if (below * BASE_CELLS_PER_METER < idx) {
+      EXPECT_EQ(*q_below, idx - 1) << "Canonical below boundary failure at idx=" << idx;
+    } else {
+      EXPECT_EQ(*q_below, idx) << "Canonical float limit edge case at idx=" << idx;
+    }
+  }
 }
 
 TEST(QuantizationTest, OriginValidation) {

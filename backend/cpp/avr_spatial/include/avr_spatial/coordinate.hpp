@@ -59,13 +59,14 @@ struct TileCoord {
 /**
  * @brief Hardened quantization of a continuous 1D world coordinate to integer base-grid units.
  *
- * Core Quantization Contract:
+ * Core Quantization Contract (ADR-007):
  * - Integer cell coordinates define spatial ownership.
- * - Continuous world coordinates are converted into discrete integer ownership via half-open interval [min, max).
+ * - Continuous world coordinates are converted into discrete integer ownership via exact half-open interval [min, max).
  * - Physical metric bounds are derived geometric views, never ground-truth ownership definitions.
- * - The base map origin is fixed for the lifetime of the map session.
+ * - The canonical map origin is permanently anchored to (0.0, 0.0) in the 'odom' frame.
+ * - Map shifts and submap origins are represented as integer base-cell offsets on the canonical grid.
+ * - Fuzzy snapping tolerances and magic epsilon shifts are rejected to preserve strict half-open ownership.
  * - Non-finite inputs (NaN, +/-Inf) and out-of-range coordinates fail explicitly (std::nullopt).
- * - Floating-point cancellation at non-zero origins is hardened via machine-precision boundary snapping.
  * - Never invokes float-to-int overflow undefined behavior; never throws exceptions.
  */
 [[nodiscard]] inline std::optional<int32_t> quantizeToBaseGridSafe(
@@ -74,18 +75,11 @@ struct TileCoord {
     return std::nullopt;
   }
 
-  double v = 0.0;
-  if (origin == 0.0) {
-    v = std::floor(coord * BASE_CELLS_PER_METER);
-  } else {
-    const double diff = (coord - origin) * BASE_CELLS_PER_METER;
-    const double round_val = std::round(diff);
-    // Boundary snap threshold based on floating-point arithmetic precision:
-    // (coord - origin) introduces rounding error bounded by machine epsilon proportional to (|coord| + |origin|).
-    const double ulp_bound = 4.0 * (std::abs(coord) + std::abs(origin)) *
-                             BASE_CELLS_PER_METER * std::numeric_limits<double>::epsilon();
-    v = (std::abs(diff - round_val) <= ulp_bound) ? round_val : std::floor(diff);
-  }
+  // Exact half-open floor quantization relative to canonical grid.
+  // When origin is non-zero, it is aligned to the canonical integer base-cell grid (ADR-007).
+  const double c_cell = std::floor(coord * BASE_CELLS_PER_METER);
+  const double o_cell = (origin == 0.0) ? 0.0 : std::round(origin * BASE_CELLS_PER_METER);
+  const double v = c_cell - o_cell;
 
   if (!std::isfinite(v) ||
       v < static_cast<double>(std::numeric_limits<int32_t>::min()) ||
