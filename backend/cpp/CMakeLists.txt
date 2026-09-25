@@ -16,7 +16,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # Export compile commands for language servers (clangd, ccls)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Expose compile commands to conventional root and backend locations
+# Expose compile commands to conventional root and backend locations (policy: dev preset canonical)
 if(CMAKE_EXPORT_COMPILE_COMMANDS)
   file(CREATE_LINK
     "${CMAKE_BINARY_DIR}/compile_commands.json"
@@ -24,12 +24,14 @@ if(CMAKE_EXPORT_COMPILE_COMMANDS)
     SYMBOLIC
     COPY_ON_ERROR
   )
-  file(CREATE_LINK
-    "${CMAKE_BINARY_DIR}/compile_commands.json"
-    "${CMAKE_CURRENT_SOURCE_DIR}/../../compile_commands.json"
-    SYMBOLIC
-    COPY_ON_ERROR
-  )
+  if(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo" OR NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../compile_commands.json")
+    file(CREATE_LINK
+      "${CMAKE_BINARY_DIR}/compile_commands.json"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../../compile_commands.json"
+      SYMBOLIC
+      COPY_ON_ERROR
+    )
+  endif()
 endif()
 
 # ------------------------------------------------------------------------------
@@ -93,7 +95,14 @@ if(AVR_BUILD_TESTS)
     GIT_SHALLOW    TRUE
   )
   FetchContent_MakeAvailable(googletest)
+endif()
 
-  # Include tests directory
+# ------------------------------------------------------------------------------
+# Core Pure C++ Libraries
+# ------------------------------------------------------------------------------
+add_subdirectory(avr_spatial)
+
+# Include infrastructure sanity tests directory
+if(AVR_BUILD_TESTS)
   add_subdirectory(tests)
 endif()

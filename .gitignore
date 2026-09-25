@@ -98,3 +98,4 @@ coverage/
 *.swo
 *~
 .clangd/
+.cache/

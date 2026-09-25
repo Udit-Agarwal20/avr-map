@@ -31,10 +31,14 @@ cmake --preset "${PRESET}"
 echo ">>> Compiling preset '${PRESET}'..."
 cmake --build --preset "${PRESET}" --parallel
 
-echo ">>> Exposing compilation database for IDE language servers..."
-if [[ -f "${CPP_DIR}/build/${PRESET}/compile_commands.json" ]]; then
-  ln -sf "${CPP_DIR}/build/${PRESET}/compile_commands.json" "${REPO_ROOT}/compile_commands.json"
-  ln -sf "build/${PRESET}/compile_commands.json" "${CPP_DIR}/compile_commands.json"
+echo ">>> Updating compilation database symlinks..."
+# Establish policy: root compile_commands.json locks to DEV preset for editor stability
+if [[ "${PRESET}" == "dev" || ! -f "${REPO_ROOT}/compile_commands.json" ]]; then
+  if [[ -f "${CPP_DIR}/build/${PRESET}/compile_commands.json" ]]; then
+    ln -sf "${CPP_DIR}/build/${PRESET}/compile_commands.json" "${REPO_ROOT}/compile_commands.json"
+    ln -sf "build/${PRESET}/compile_commands.json" "${CPP_DIR}/compile_commands.json"
+    echo "    Linked root compile_commands.json -> build/${PRESET}/compile_commands.json"
+  fi
 fi
 
 echo "================================================================="
