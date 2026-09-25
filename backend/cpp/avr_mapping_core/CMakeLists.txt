@@ -1,0 +1,21 @@
+add_library(avr_mapping_core
+  src/uniform_map.cpp
+)
+
+add_library(AVR::mapping_core ALIAS avr_mapping_core)
+
+target_include_directories(avr_mapping_core
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
+
+target_link_libraries(avr_mapping_core
+  PUBLIC
+    AVR::spatial
+    avr_build_flags
+)
+
+if(AVR_BUILD_TESTS)
+  add_subdirectory(tests)
+endif()

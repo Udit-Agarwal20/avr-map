@@ -101,6 +101,7 @@ endif()
 # Core Pure C++ Libraries
 # ------------------------------------------------------------------------------
 add_subdirectory(avr_spatial)
+add_subdirectory(avr_mapping_core)
 
 # Include infrastructure sanity tests directory
 if(AVR_BUILD_TESTS)
