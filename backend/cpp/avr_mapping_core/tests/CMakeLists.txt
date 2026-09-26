@@ -28,6 +28,10 @@ add_executable(avr_mapping_tests
   test_recent_observation_cache.cpp
   test_recent_observation_spatial_index.cpp
   test_recent_observation_cache_stress.cpp
+  test_persistent_replay.cpp
+  test_persistent_replay_completeness.cpp
+  test_persistent_replay_transaction.cpp
+  test_persistent_replay_stress.cpp
 )
 
 target_link_libraries(avr_mapping_tests

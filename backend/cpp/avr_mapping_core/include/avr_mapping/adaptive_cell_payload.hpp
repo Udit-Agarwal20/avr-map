@@ -128,6 +128,62 @@ class AdaptiveCellPayload {
     return true;
   }
 
+  /**
+   * @brief Transactionally prepends older historical observations into this active payload.
+   *
+   * Invariant & Guard Rules:
+   * - historical payload must have observations (hasObservations() == true).
+   * - this payload must have observations (hasObservations() == true).
+   * - historical.lastSeenFrame() < this->firstSeenFrame() (strict temporal ordering, no overlap).
+   * - observed_frame_count sum must not overflow uint64_t.
+   * - ElevationStats merge must succeed with finite results.
+   * - On success:
+   *     elevation = historical merged with current elevation
+   *     first_seen_frame = historical.first_seen_frame
+   *     last_seen_frame = current.last_seen_frame (preserved)
+   *     observed_frame_count = historical.count + current.count
+   *     last_update_reasons = current.last_update_reasons (preserved)
+   * - On failure: leaves all fields completely unmodified.
+   *
+   * @param historical Historical payload from direct parent replay.
+   * @return true if prepended successfully, false on invalid input, temporal overlap,
+   *         overflow, or numeric failure.
+   */
+  bool tryPrependHistory(const AdaptiveCellPayload& historical) noexcept {
+    if (!historical.hasObservations() || historical.observed_frame_count_ == 0) {
+      return false;
+    }
+    if (!hasObservations() || observed_frame_count_ == 0) {
+      return false;
+    }
+    if (historical.last_seen_frame_ >= first_seen_frame_) {
+      return false;
+    }
+    if (std::numeric_limits<uint64_t>::max() - historical.observed_frame_count_ < observed_frame_count_) {
+      return false;
+    }
+
+    ElevationStats candidate = historical.elevation_;
+    if (!candidate.tryMerge(elevation_)) {
+      return false;
+    }
+
+    // Validate resulting first_seen <= last_seen
+    if (historical.first_seen_frame_ > last_seen_frame_) {
+      return false;
+    }
+
+    const uint64_t total_frames = observed_frame_count_ + historical.observed_frame_count_;
+    if (candidate.count() < total_frames) {
+      return false;
+    }
+
+    elevation_ = candidate;
+    first_seen_frame_ = historical.first_seen_frame_;
+    observed_frame_count_ = total_frames;
+    return true;
+  }
+
   bool operator==(const AdaptiveCellPayload& other) const noexcept = default;
   bool operator!=(const AdaptiveCellPayload& other) const noexcept = default;
 

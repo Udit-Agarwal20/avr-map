@@ -10,6 +10,8 @@
 #include "avr_mapping/adaptive_payload_store.hpp"
 #include "avr_mapping/frame_evidence.hpp"
 #include "avr_mapping/persistent_map_stats.hpp"
+#include "avr_mapping/recent_observation_cache.hpp"
+#include "avr_mapping/replay_reconstruction_result.hpp"
 #include "avr_mapping/resolution_decision.hpp"
 #include "avr_spatial/cell_key.hpp"
 #include "avr_spatial/coordinate.hpp"
@@ -94,6 +96,30 @@ class PersistentAdaptiveMap {
       ResolutionReasonBits reasons = ResolutionReasonBits{});
 
   /**
+   * @brief Reconstructs child leaf payloads and repairs REPLAY_REQUIRED state via direct-parent replay.
+   *
+   * Eligibility & Requirements:
+   * - parent must exist, be an INTERNAL node, and have a complete RETIRED_PARENT_CACHE.
+   * - parent must have exactly four direct children in the hierarchy, and ALL four must currently be LEAF nodes.
+   * - Cached raw observations must fully span the parent historical interval [first_seen, last_seen].
+   * - Reconstructed parent state must reproduce immutable retired parent measurement/temporal invariants.
+   * - Total reconstructed child observations must exactly equal retired parent historical observations.
+   * - Any existing post-split child active payloads must strictly follow parent.last_seen_frame.
+   *
+   * Transaction Guarantee:
+   * - On any validation failure, returns explicit ReplayStatus with ZERO persistent map mutation.
+   * - On success: child payloads are committed, REPLAY_REQUIRED is cleared on all four children,
+   *   and parent retired cache is preserved completely untouched.
+   *
+   * @param parent CellKey of the internal parent node to replay.
+   * @param cache Bounded recent raw observation cache (accessed read-only).
+   * @return ReplayReconstructionResult detailing outcome and accounting metrics.
+   */
+  ReplayReconstructionResult replayDirectChildren(
+      const avr::spatial::CellKey& parent,
+      const RecentObservationCache& cache);
+
+  /**
    * @brief Validates all cross-subsystem structural and payload invariants.
    */
   [[nodiscard]] PersistentMapValidationResult validateInvariants() const;
@@ -118,6 +144,14 @@ class PersistentAdaptiveMap {
 
   [[nodiscard]] bool hasFusedFrames() const noexcept {
     return has_fused_frames_;
+  }
+
+  [[nodiscard]] uint64_t totalFramesFused() const noexcept {
+    return total_frames_fused_;
+  }
+
+  [[nodiscard]] uint64_t totalObservationsFused() const noexcept {
+    return total_observations_fused_;
   }
 
   [[nodiscard]] const AdaptiveCellPayload* findActivePayload(avr::spatial::CellKey key) const noexcept {
