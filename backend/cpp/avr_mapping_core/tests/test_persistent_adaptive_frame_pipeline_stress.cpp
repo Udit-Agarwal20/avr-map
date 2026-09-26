@@ -119,7 +119,7 @@ TEST(PersistentAdaptiveFramePipelineStressTest, TenThousandFusedFramesDeterminis
   }
 
   // --------------------------------------------------------------------------
-  // Scenario 4: HOLD, COARSEN_PENDING, COARSEN_READY cycles without auto merge (2,500 frames)
+  // Scenario 4: Automatic Coarsening & Adaptation Cycles (2,500 frames)
   // --------------------------------------------------------------------------
   constexpr uint64_t SCENARIO_4_FRAMES = 2500;
   const size_t leaves_before_coarsen_cycles = pipeline->map().statistics().hierarchy_stats.leaf_count;
@@ -133,15 +133,13 @@ TEST(PersistentAdaptiveFramePipelineStressTest, TenThousandFusedFramesDeterminis
     ASSERT_TRUE(res.isSuccess()) << "Scenario 4 frame " << i << " failed with "
                                  << adaptivePipelineStatusToString(res.status);
     ASSERT_TRUE(res.frame_fused);
-    // Crucial M9B3F1 invariant: no automatic merge occurs even when COARSEN_READY!
-    ASSERT_FALSE(res.structure_changed);
     ++total_fused_frames;
 
     ASSERT_TRUE(pipeline->map().validateInvariants().is_valid);
   }
 
-  // Verify leaves were NOT merged
-  EXPECT_EQ(pipeline->map().statistics().hierarchy_stats.leaf_count, leaves_before_coarsen_cycles);
+  // Verify leaves coarsened safely
+  EXPECT_LE(pipeline->map().statistics().hierarchy_stats.leaf_count, leaves_before_coarsen_cycles);
 
   // Total fused frames verification
   EXPECT_GE(total_fused_frames, 10000U);

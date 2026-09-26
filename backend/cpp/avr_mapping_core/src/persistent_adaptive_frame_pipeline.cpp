@@ -9,6 +9,65 @@
 
 namespace avr::mapping {
 
+namespace {
+
+bool isAncestorOrDescendant(const avr::spatial::CellKey& a, const avr::spatial::CellKey& b) noexcept {
+  if (a == b) return true;
+  if (a.level > b.level) {
+    auto curr = avr::spatial::parentOf(b);
+    while (curr.has_value()) {
+      if (*curr == a) return true;
+      if (curr->level >= a.level) break;
+      curr = avr::spatial::parentOf(*curr);
+    }
+  } else if (b.level > a.level) {
+    auto curr = avr::spatial::parentOf(a);
+    while (curr.has_value()) {
+      if (*curr == b) return true;
+      if (curr->level >= b.level) break;
+      curr = avr::spatial::parentOf(*curr);
+    }
+  }
+  return false;
+}
+
+void enumerateDescendantLeaves(
+    const PersistentAdaptiveMap& map,
+    const avr::spatial::CellKey& root,
+    std::vector<avr::spatial::CellKey>& leaves) {
+  auto children_opt = avr::spatial::childrenOf(root);
+  if (!children_opt.has_value()) return;
+  for (const auto& child : *children_opt) {
+    if (map.hierarchy().isLeaf(child)) {
+      leaves.push_back(child);
+    } else if (map.hierarchy().isInternal(child)) {
+      enumerateDescendantLeaves(map, child, leaves);
+    }
+  }
+}
+
+bool subtreeHasProvenanceGap(
+    const PersistentAdaptiveMap& map,
+    const avr::spatial::CellKey& root) {
+  auto children_opt = avr::spatial::childrenOf(root);
+  if (!children_opt.has_value()) return false;
+  for (const auto& child : *children_opt) {
+    if (map.hierarchy().isLeaf(child)) {
+      if (map.requiresReplay(child)) return true;
+    } else if (map.hierarchy().isInternal(child)) {
+      const auto* coarsening_state = map.findInternalCoarseningState(child);
+      if (coarsening_state != nullptr &&
+          coarsening_state->base_state == CoarseningBaseState::INCOMPLETE) {
+        return true;
+      }
+      if (subtreeHasProvenanceGap(map, child)) return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
+
 std::unique_ptr<PersistentAdaptiveFramePipeline> PersistentAdaptiveFramePipeline::create(
     const PersistentAdaptivePipelineConfig& config) {
   if (!config.isValid()) {
@@ -32,18 +91,21 @@ std::unique_ptr<PersistentAdaptiveFramePipeline> PersistentAdaptiveFramePipeline
           std::move(*controller_opt),
           std::move(*hysteresis_opt),
           std::move(*cache_opt),
-          config.pool_block_capacity));
+          config.pool_block_capacity,
+          config.coarsen_group_max_age_generations));
 }
 
 PersistentAdaptiveFramePipeline::PersistentAdaptiveFramePipeline(
     ResolutionController controller,
     ResolutionHysteresisController hysteresis,
     RecentObservationCache cache,
-    size_t pool_block_capacity)
+    size_t pool_block_capacity,
+    uint64_t coarsen_group_max_age_generations)
     : resolution_controller_(std::move(controller)),
       hysteresis_(std::move(hysteresis)),
       persistent_map_(pool_block_capacity),
-      replay_cache_(std::move(cache)) {}
+      replay_cache_(std::move(cache)),
+      coarsen_group_max_age_generations_(coarsen_group_max_age_generations) {}
 
 AdaptivePipelineFrameResult PersistentAdaptiveFramePipeline::processFrame(
     std::span<const PointXYZ> raw_points,
@@ -113,13 +175,38 @@ AdaptivePipelineFrameResult PersistentAdaptiveFramePipeline::processFrame(
     ++processing_generation_;
     result.processing_generation_after = processing_generation_;
 
-    auto cache_stats = replay_cache_.commitPreparedFrame(std::move(*prep_frame_opt));
-    if (!cache_stats.has_value()) {
+    bool cache_degraded = false;
+    if (test_simulate_cache_commit_bad_alloc_) {
+      cache_degraded = true;
+      result.cache_committed = false;
+    } else if (test_simulate_cache_commit_failure_) {
       fatal_error_latched_ = true;
       result.status = AdaptivePipelineStatus::CACHE_COMMIT_INTERNAL_ERROR;
       return result;
+    } else {
+      try {
+        auto cache_stats = replay_cache_.commitPreparedFrame(std::move(*prep_frame_opt));
+        if (!cache_stats.has_value()) {
+          fatal_error_latched_ = true;
+          result.status = AdaptivePipelineStatus::CACHE_COMMIT_INTERNAL_ERROR;
+          return result;
+        }
+        result.cache_committed = true;
+      } catch (const std::bad_alloc&) {
+        cache_degraded = true;
+        result.cache_committed = false;
+      }
     }
-    result.cache_committed = true;
+
+    if (!expireStaleReadyEntries(result)) {
+      return result;
+    }
+
+    if (!validatePolicyMetadataInvariants()) {
+      fatal_error_latched_ = true;
+      result.status = AdaptivePipelineStatus::COARSENING_INTERNAL_ERROR;
+      return result;
+    }
 
     auto map_val = persistent_map_.validateInvariants();
     if (!map_val.is_valid || test_simulate_invariant_failure_) {
@@ -128,7 +215,11 @@ AdaptivePipelineFrameResult PersistentAdaptiveFramePipeline::processFrame(
       return result;
     }
 
-    result.status = AdaptivePipelineStatus::SUCCESS;
+    if (cache_degraded) {
+      result.status = AdaptivePipelineStatus::SUCCESS_CACHE_DEGRADED;
+    } else {
+      result.status = AdaptivePipelineStatus::SUCCESS;
+    }
     return result;
   }
 
@@ -396,10 +487,39 @@ AdaptivePipelineFrameResult PersistentAdaptiveFramePipeline::processFrame(
       if (hysteresis_.eraseRegion(removed_key)) {
         ++result.hysteresis_erased;
       }
+      leaf_policy_metadata_.erase(removed_key);
     }
   } catch (const std::bad_alloc&) {
     fatal_error_latched_ = true;
     result.status = AdaptivePipelineStatus::POLICY_COMMIT_FATAL;
+    return result;
+  }
+
+  // Update LeafPolicyMetadata for surviving pre-existing active leaves
+  try {
+    if (test_simulate_metadata_bad_alloc_) {
+      throw std::bad_alloc();
+    }
+    for (const auto& prep : surviving_batch) {
+      auto& meta = leaf_policy_metadata_[prep.region];
+      meta.latest_decision_generation = processing_generation_;
+      meta.latest_requested_level = prep.result.requested_level;
+      meta.latest_reasons = prep.result.trigger_reasons;
+      if (prep.result.action == HysteresisAction::COARSEN_READY ||
+          prep.result.action == HysteresisAction::COARSEN_READY_PENDING_ACK) {
+        meta.latest_ready_generation = processing_generation_;
+      } else {
+        meta.latest_ready_generation = 0;
+      }
+    }
+  } catch (const std::bad_alloc&) {
+    fatal_error_latched_ = true;
+    result.status = AdaptivePipelineStatus::COARSENING_INTERNAL_ERROR;
+    return result;
+  }
+
+  // Stale readiness expiration (age > W)
+  if (!expireStaleReadyEntries(result)) {
     return result;
   }
 
@@ -427,7 +547,423 @@ AdaptivePipelineFrameResult PersistentAdaptiveFramePipeline::processFrame(
     }
   }
 
-  // 13. Final Invariant Validation (Requirement 61, 62)
+  if (cache_degraded) {
+    if (!validatePolicyMetadataInvariants()) {
+      fatal_error_latched_ = true;
+      result.status = AdaptivePipelineStatus::COARSENING_INTERNAL_ERROR;
+      return result;
+    }
+    auto map_val = persistent_map_.validateInvariants();
+    if (!map_val.is_valid || test_simulate_invariant_failure_) {
+      fatal_error_latched_ = true;
+      result.status = AdaptivePipelineStatus::INVARIANT_FAILURE;
+      return result;
+    }
+    result.status = AdaptivePipelineStatus::SUCCESS_CACHE_DEGRADED;
+    return result;
+  }
+
+  // 13. Phase 7: Post-Fusion Automatic Coarsening & Complete-Shadow Recovery
+  std::vector<avr::spatial::CellKey> split_regions;
+  for (const auto& sa : result.structural_action_records) {
+    if (sa.action_type == StructuralActionType::SPLIT) {
+      split_regions.push_back(sa.region);
+    }
+  }
+
+  std::unordered_map<avr::spatial::CellKey, HysteresisAction> current_committed_actions;
+  for (const auto& prep : surviving_batch) {
+    current_committed_actions[prep.region] = prep.result.action;
+  }
+
+  std::vector<CoarsenCandidate> candidates;
+
+  // Direct Merge Seeding
+  std::vector<avr::spatial::CellKey> seed_parents;
+  for (const auto& prep : surviving_batch) {
+    if (prep.result.action == HysteresisAction::COARSEN_READY ||
+        prep.result.action == HysteresisAction::COARSEN_READY_PENDING_ACK) {
+      auto parent_opt = avr::spatial::parentOf(prep.region);
+      if (parent_opt.has_value()) {
+        seed_parents.push_back(*parent_opt);
+      }
+    }
+  }
+  std::sort(seed_parents.begin(), seed_parents.end());
+  seed_parents.erase(std::unique(seed_parents.begin(), seed_parents.end()), seed_parents.end());
+  result.coarsen_groups_considered += static_cast<uint32_t>(seed_parents.size());
+
+  for (const auto& P : seed_parents) {
+    if (!persistent_map_.hierarchy().isInternal(P)) {
+      continue;
+    }
+    bool split_conflict = false;
+    for (const auto& s : split_regions) {
+      if (isAncestorOrDescendant(P, s)) {
+        split_conflict = true;
+        break;
+      }
+    }
+    if (split_conflict) {
+      continue;
+    }
+
+    auto children_opt = avr::spatial::childrenOf(P);
+    if (!children_opt.has_value()) {
+      continue;
+    }
+
+    bool all_children_eligible = true;
+    ResolutionReasonBits merged_reasons{};
+
+    for (const auto& C : *children_opt) {
+      if (!persistent_map_.hierarchy().isLeaf(C)) {
+        all_children_eligible = false;
+        break;
+      }
+      if (persistent_map_.requiresReplay(C)) {
+        all_children_eligible = false;
+        break;
+      }
+      auto meta_it = leaf_policy_metadata_.find(C);
+      if (meta_it == leaf_policy_metadata_.end()) {
+        all_children_eligible = false;
+        break;
+      }
+      if (meta_it->second.latest_decision_generation != processing_generation_) {
+        all_children_eligible = false;
+        break;
+      }
+      if (meta_it->second.latest_ready_generation != processing_generation_) {
+        all_children_eligible = false;
+        break;
+      }
+      auto act_it = current_committed_actions.find(C);
+      if (act_it == current_committed_actions.end()) {
+        all_children_eligible = false;
+        break;
+      }
+      if (act_it->second != HysteresisAction::COARSEN_READY &&
+          act_it->second != HysteresisAction::COARSEN_READY_PENDING_ACK) {
+        all_children_eligible = false;
+        break;
+      }
+      const auto* h_state = hysteresis_.findRegionState(C);
+      if (h_state == nullptr || !h_state->coarsen_action_pending ||
+          h_state->pending_target_level != P.level) {
+        all_children_eligible = false;
+        break;
+      }
+      if (meta_it->second.latest_requested_level < P.level) {
+        all_children_eligible = false;
+        break;
+      }
+      for (const auto& s : split_regions) {
+        if (isAncestorOrDescendant(C, s)) {
+          all_children_eligible = false;
+          break;
+        }
+      }
+      if (!all_children_eligible) {
+        break;
+      }
+
+      merged_reasons = merged_reasons | meta_it->second.latest_reasons;
+    }
+
+    if (all_children_eligible) {
+      candidates.push_back(CoarsenCandidate{
+          .type = CoarsenCandidateType::DIRECT_MERGE,
+          .root = P,
+          .level = P.level,
+          .reasons = merged_reasons,
+      });
+    }
+  }
+
+  // Recovery Seeding
+  std::vector<avr::spatial::CellKey> seed_ancestors;
+  for (const auto& prep : surviving_batch) {
+    if (prep.result.action != HysteresisAction::COARSEN_READY &&
+        prep.result.action != HysteresisAction::COARSEN_READY_PENDING_ACK) {
+      continue;
+    }
+    bool is_gap_leaf = persistent_map_.requiresReplay(prep.region);
+    if (!is_gap_leaf) {
+      auto curr = avr::spatial::parentOf(prep.region);
+      while (curr.has_value()) {
+        const auto* cs = persistent_map_.findInternalCoarseningState(*curr);
+        if (cs != nullptr && cs->base_state == CoarseningBaseState::INCOMPLETE) {
+          is_gap_leaf = true;
+          break;
+        }
+        curr = avr::spatial::parentOf(*curr);
+      }
+    }
+
+    if (is_gap_leaf) {
+      auto curr = avr::spatial::parentOf(prep.region);
+      while (curr.has_value()) {
+        const auto* cs = persistent_map_.findInternalCoarseningState(*curr);
+        if (cs != nullptr &&
+            (cs->base_state == CoarseningBaseState::COMPLETE_EMPTY ||
+             cs->base_state == CoarseningBaseState::COMPLETE_RETIRED_CACHE)) {
+          seed_ancestors.push_back(*curr);
+          break;
+        }
+        curr = avr::spatial::parentOf(*curr);
+      }
+    }
+  }
+
+  std::sort(seed_ancestors.begin(), seed_ancestors.end());
+  seed_ancestors.erase(std::unique(seed_ancestors.begin(), seed_ancestors.end()), seed_ancestors.end());
+  result.recovery_candidates += static_cast<uint32_t>(seed_ancestors.size());
+
+  for (const auto& A : seed_ancestors) {
+    if (!persistent_map_.hierarchy().isInternal(A)) {
+      ++result.recovery_blocked;
+      continue;
+    }
+    if (!subtreeHasProvenanceGap(persistent_map_, A)) {
+      ++result.recovery_blocked;
+      continue;
+    }
+    bool split_conflict = false;
+    for (const auto& s : split_regions) {
+      if (isAncestorOrDescendant(A, s)) {
+        split_conflict = true;
+        break;
+      }
+    }
+    if (split_conflict) {
+      ++result.recovery_blocked;
+      continue;
+    }
+
+    std::vector<avr::spatial::CellKey> frontier;
+    enumerateDescendantLeaves(persistent_map_, A, frontier);
+    if (frontier.empty()) {
+      ++result.recovery_blocked;
+      continue;
+    }
+
+    bool frontier_eligible = true;
+    ResolutionReasonBits recovery_reasons{};
+
+    for (const auto& leaf : frontier) {
+      if (!persistent_map_.hierarchy().isLeaf(leaf)) {
+        frontier_eligible = false;
+        break;
+      }
+      auto meta_it = leaf_policy_metadata_.find(leaf);
+      if (meta_it == leaf_policy_metadata_.end()) {
+        frontier_eligible = false;
+        break;
+      }
+      if (meta_it->second.latest_decision_generation != processing_generation_) {
+        frontier_eligible = false;
+        break;
+      }
+      if (meta_it->second.latest_ready_generation != processing_generation_) {
+        frontier_eligible = false;
+        break;
+      }
+      auto act_it = current_committed_actions.find(leaf);
+      if (act_it == current_committed_actions.end()) {
+        frontier_eligible = false;
+        break;
+      }
+      if (act_it->second != HysteresisAction::COARSEN_READY &&
+          act_it->second != HysteresisAction::COARSEN_READY_PENDING_ACK) {
+        frontier_eligible = false;
+        break;
+      }
+      const auto* h_state = hysteresis_.findRegionState(leaf);
+      if (h_state == nullptr || !h_state->coarsen_action_pending) {
+        frontier_eligible = false;
+        break;
+      }
+      if (meta_it->second.latest_requested_level < A.level) {
+        frontier_eligible = false;
+        break;
+      }
+      if (act_it->second == HysteresisAction::HOLD_CURRENT ||
+          act_it->second == HysteresisAction::REFINE_NOW) {
+        frontier_eligible = false;
+        break;
+      }
+      for (const auto& s : split_regions) {
+        if (isAncestorOrDescendant(leaf, s)) {
+          frontier_eligible = false;
+          break;
+        }
+      }
+      if (!frontier_eligible) {
+        break;
+      }
+
+      recovery_reasons = recovery_reasons | meta_it->second.latest_reasons;
+    }
+
+    if (frontier_eligible) {
+      candidates.push_back(CoarsenCandidate{
+          .type = CoarsenCandidateType::RECOVERY_COLLAPSE,
+          .root = A,
+          .level = A.level,
+          .reasons = recovery_reasons,
+      });
+    } else {
+      ++result.recovery_blocked;
+    }
+  }
+
+  // Conflict & Overlap Resolution
+  std::sort(candidates.begin(), candidates.end(), [](const CoarsenCandidate& a, const CoarsenCandidate& b) {
+    if (a.level != b.level) {
+      return a.level < b.level;
+    }
+    if (a.type != b.type) {
+      return static_cast<uint8_t>(a.type) < static_cast<uint8_t>(b.type);
+    }
+    return a.root < b.root;
+  });
+
+  std::vector<CoarsenCandidate> accepted_operations;
+  for (const auto& cand : candidates) {
+    bool conflicts = false;
+    for (const auto& accepted : accepted_operations) {
+      if (isAncestorOrDescendant(cand.root, accepted.root)) {
+        conflicts = true;
+        break;
+      }
+    }
+    if (!conflicts) {
+      accepted_operations.push_back(cand);
+    } else {
+      if (cand.type == CoarsenCandidateType::RECOVERY_COLLAPSE) {
+        ++result.recovery_blocked;
+      }
+    }
+  }
+
+  // Execute Accepted Operations
+  for (const auto& cand : accepted_operations) {
+    if (cand.type == CoarsenCandidateType::DIRECT_MERGE) {
+      ++result.direct_merge_attempts;
+
+      auto children_opt = avr::spatial::childrenOf(cand.root);
+      if (!children_opt.has_value()) {
+        fatal_error_latched_ = true;
+        result.status = AdaptivePipelineStatus::COARSENING_INTERNAL_ERROR;
+        return result;
+      }
+      std::vector<avr::spatial::CellKey> children(children_opt->begin(), children_opt->end());
+      std::sort(children.begin(), children.end());
+
+      for (const auto& C : children) {
+        const auto* h_state = hysteresis_.findRegionState(C);
+        if (h_state == nullptr || !h_state->coarsen_action_pending) {
+          fatal_error_latched_ = true;
+          result.status = AdaptivePipelineStatus::COARSENING_INTERNAL_ERROR;
+          return result;
+        }
+      }
+
+      auto merge_res = persistent_map_.mergeDirectChildren(cand.root, cand.reasons);
+      if (test_simulate_coarsen_internal_error_) {
+        merge_res.status = MergeStatus::INTERNAL_ERROR;
+      }
+
+      if (merge_res.status == MergeStatus::APPLIED) {
+        for (const auto& C : children) {
+          bool ack_ok = hysteresis_.acknowledgeCoarsenResult(C, CoarsenAttemptOutcome::APPLIED);
+          if (test_simulate_ack_failure_) {
+            ack_ok = false;
+          }
+          if (!ack_ok) {
+            fatal_error_latched_ = true;
+            result.status = AdaptivePipelineStatus::COARSENING_INTERNAL_ERROR;
+            return result;
+          }
+          leaf_policy_metadata_.erase(C);
+        }
+        hysteresis_.eraseRegion(cand.root);
+        leaf_policy_metadata_.erase(cand.root);
+
+        result.structural_action_records.push_back(StructuralActionRecord{
+            .region = cand.root,
+            .from_level = static_cast<uint8_t>(cand.root.level - 1),
+            .to_level = cand.root.level,
+            .reasons = cand.reasons,
+            .action_type = StructuralActionType::DIRECT_MERGE,
+        });
+        result.structure_changed = true;
+        ++result.direct_merges_applied;
+      } else if (merge_res.status == MergeStatus::CHILD_NOT_LEAF ||
+                 merge_res.status == MergeStatus::REPLAY_INCOMPLETE ||
+                 merge_res.status == MergeStatus::CACHE_HISTORY_INSUFFICIENT) {
+        for (const auto& C : children) {
+          bool ack_ok = hysteresis_.acknowledgeCoarsenResult(C, CoarsenAttemptOutcome::BLOCKED_HOLD_FINE);
+          if (test_simulate_ack_failure_) {
+            ack_ok = false;
+          }
+          if (!ack_ok) {
+            fatal_error_latched_ = true;
+            result.status = AdaptivePipelineStatus::COARSENING_INTERNAL_ERROR;
+            return result;
+          }
+          auto it = leaf_policy_metadata_.find(C);
+          if (it != leaf_policy_metadata_.end()) {
+            it->second.latest_ready_generation = 0;
+          }
+        }
+        ++result.direct_merges_blocked;
+      } else {
+        fatal_error_latched_ = true;
+        result.status = AdaptivePipelineStatus::COARSENING_INTERNAL_ERROR;
+        return result;
+      }
+    } else if (cand.type == CoarsenCandidateType::RECOVERY_COLLAPSE) {
+      ++result.recovery_attempts;
+
+      auto collapse_res = persistent_map_.collapseSubtreeFromCompleteShadow(cand.root, cand.reasons);
+      if (test_simulate_coarsen_internal_error_) {
+        collapse_res.status = SubtreeCollapseStatus::INTERNAL_ERROR;
+      }
+
+      if (collapse_res.status == SubtreeCollapseStatus::APPLIED_GAP_CLOSED) {
+        for (const auto& key : collapse_res.removed_descendant_keys) {
+          hysteresis_.eraseRegion(key);
+          leaf_policy_metadata_.erase(key);
+        }
+        hysteresis_.eraseRegion(cand.root);
+        leaf_policy_metadata_.erase(cand.root);
+
+        result.structural_action_records.push_back(StructuralActionRecord{
+            .region = cand.root,
+            .from_level = collapse_res.finest_removed_level,
+            .to_level = cand.root.level,
+            .reasons = cand.reasons,
+            .action_type = StructuralActionType::SUBTREE_RECOVERY_COLLAPSE,
+        });
+        result.structure_changed = true;
+        ++result.recovery_applied;
+      } else {
+        fatal_error_latched_ = true;
+        result.status = AdaptivePipelineStatus::COARSENING_INTERNAL_ERROR;
+        return result;
+      }
+    }
+  }
+
+  // 14. Validation and Final Result Status Assignment
+  if (!validatePolicyMetadataInvariants()) {
+    fatal_error_latched_ = true;
+    result.status = AdaptivePipelineStatus::COARSENING_INTERNAL_ERROR;
+    return result;
+  }
+
   auto map_val = persistent_map_.validateInvariants();
   if (!map_val.is_valid || test_simulate_invariant_failure_) {
     fatal_error_latched_ = true;
@@ -435,9 +971,7 @@ AdaptivePipelineFrameResult PersistentAdaptiveFramePipeline::processFrame(
     return result;
   }
 
-  if (cache_degraded) {
-    result.status = AdaptivePipelineStatus::SUCCESS_CACHE_DEGRADED;
-  } else if (result.replay_pending) {
+  if (result.replay_pending) {
     result.status = AdaptivePipelineStatus::SUCCESS_REPLAY_PENDING;
   } else {
     result.status = AdaptivePipelineStatus::SUCCESS;
@@ -577,6 +1111,87 @@ bool PersistentAdaptiveFramePipeline::refineRegionFromEvidence(
     }
   }
 
+  return true;
+}
+
+std::vector<std::pair<avr::spatial::CellKey, LeafPolicyMetadata>>
+PersistentAdaptiveFramePipeline::leafPolicyMetadataSnapshot() const {
+  std::vector<std::pair<avr::spatial::CellKey, LeafPolicyMetadata>> snapshot;
+  snapshot.reserve(leaf_policy_metadata_.size());
+  for (const auto& entry : leaf_policy_metadata_) {
+    snapshot.push_back(entry);
+  }
+  std::sort(snapshot.begin(), snapshot.end(), [](const auto& a, const auto& b) {
+    return a.first < b.first;
+  });
+  return snapshot;
+}
+
+bool PersistentAdaptiveFramePipeline::expireStaleReadyEntries(AdaptivePipelineFrameResult& result) {
+  std::vector<avr::spatial::CellKey> ready_keys;
+  for (const auto& [key, meta] : leaf_policy_metadata_) {
+    if (meta.latest_decision_generation > processing_generation_ ||
+        meta.latest_ready_generation > processing_generation_) {
+      fatal_error_latched_ = true;
+      result.status = AdaptivePipelineStatus::COARSENING_INTERNAL_ERROR;
+      return false;
+    }
+    if (meta.latest_ready_generation > 0) {
+      ready_keys.push_back(key);
+    }
+  }
+  std::sort(ready_keys.begin(), ready_keys.end());
+
+  for (const auto& key : ready_keys) {
+    auto it = leaf_policy_metadata_.find(key);
+    if (it == leaf_policy_metadata_.end()) {
+      continue;
+    }
+    const uint64_t age = processing_generation_ - it->second.latest_ready_generation;
+    if (age > coarsen_group_max_age_generations_) {
+      const auto* reg_state = hysteresis_.findRegionState(key);
+      if (reg_state == nullptr || !reg_state->coarsen_action_pending) {
+        fatal_error_latched_ = true;
+        result.status = AdaptivePipelineStatus::COARSENING_INTERNAL_ERROR;
+        return false;
+      }
+      bool ack_ok = hysteresis_.acknowledgeCoarsenResult(key, CoarsenAttemptOutcome::CANCELLED);
+      if (test_simulate_ack_failure_) {
+        ack_ok = false;
+      }
+      if (!ack_ok) {
+        fatal_error_latched_ = true;
+        result.status = AdaptivePipelineStatus::COARSENING_INTERNAL_ERROR;
+        return false;
+      }
+      it->second.latest_ready_generation = 0;
+      ++result.stale_ready_cancelled;
+    }
+  }
+  return true;
+}
+
+bool PersistentAdaptiveFramePipeline::validatePolicyMetadataInvariants() const noexcept {
+  for (const auto& [key, meta] : leaf_policy_metadata_) {
+    if (!persistent_map_.hierarchy().isLeaf(key)) {
+      return false;
+    }
+    if (meta.latest_decision_generation > processing_generation_) {
+      return false;
+    }
+    if (meta.latest_ready_generation > processing_generation_) {
+      return false;
+    }
+    if (!avr::spatial::isValidLevel(meta.latest_requested_level)) {
+      return false;
+    }
+    if (meta.latest_ready_generation > 0) {
+      const auto* h_state = hysteresis_.findRegionState(key);
+      if (h_state == nullptr || !h_state->coarsen_action_pending) {
+        return false;
+      }
+    }
+  }
   return true;
 }
 

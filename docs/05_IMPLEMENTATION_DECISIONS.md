@@ -575,3 +575,51 @@ This document records architectural and implementation decisions for the **AVR-M
   29. **Deferred to Milestone 9B3F2**: Automatic sibling coarsening (`mergeDirectChildren`), sibling freshness windows, automatic subtree-collapse recovery (`collapseSubtreeFromCompleteShadow`), latest ready generation tracking, and map revision remain strictly deferred to Milestone 9B3F2.
 - **Reason**: Implements the complete autonomous frame adaptation loop while upholding strict transaction isolation, preventing catastrophic policy drift, and ensuring safe localized spatial refinement.
 - **Consequences**: Provides robust, high-performance LiDAR frame processing that scales dynamically from coarse coverage to fine localized representation while guaranteeing bit-for-bit repeatability and strict memory safety.
+
+---
+
+## ADR-022: Post-Fusion Automatic Sibling Coarsening, Sibling Freshness Windows, and Complete-Shadow Subtree Recovery Pipeline
+
+- **Status**: Accepted
+- **Context**:
+  Milestone 9B3F1 implemented the first persistent adaptive frame pipeline (`PersistentAdaptiveFramePipeline`), integrating ingestion, localized refinement, direct replay reconstruction, payload fusion, staged hysteresis, and bounded raw caching. However, automatic coarsening was intentionally deferred to Milestone 9B3F2 to maintain strict transaction isolation and prevent fine topology destruction without an au  Milestone 9B3F2 implements the complete post-fusion coarsening half of the autonomous loop:
+  1. Automatic sibling direct merge (`mergeDirectChildren`);
+  2. Bounded sibling readiness freshness windows ($W = \text{coarsen\_group\_max\_age\_generations}$ for stale expiration only);
+  3. Automatic complete-shadow subtree recovery collapse (`collapseSubtreeFromCompleteShadow`);
+  4. Multi-candidate conflict resolution and non-overlapping execution;
+  5. Policy metadata lifecycle and cross-frame state synchronization.
+- **Decisions**:
+  1. **Resolution Level Constants**: Dyadic hierarchy levels strictly define physical metric resolutions: $L0 = 0.05\,\text{m}$ (5 cm), $L1 = 0.10\,\text{m}$ (10 cm), $L2 = 0.20\,\text{m}$ (20 cm), and $L3 = 0.40\,\text{m}$ (40 cm).
+  2. **Post-Fusion Phase Placement (Phase 7)**: Automatic coarsening executes strictly in Phase 7 after persistent map frame evidence fusion (Phase 4), staged hysteresis policy batch commit (Phase 5), `LeafPolicyMetadata` lifecycle updates, stale readiness expiration, and staged raw cache commit (Phase 6). Coarsening operates strictly on the freshly fused, post-refinement persistent topology.
+  3. **Cache Degraded and Empty Frame Coarsening Invariants**:
+     - When raw cache commit experiences allocation degradation (`SUCCESS_CACHE_DEGRADED`), candidate discovery and coarsening execution are skipped to preserve conservative coarse cache reversibility. Prior to skipping, current metadata is updated and stale readiness expiration executes.
+     - Valid empty frames (0 accepted points) execute stale readiness expiration and metadata invariant validation, but bypass candidate discovery and execution.
+  4. **Model A Evidence Invariant & Candidate Seeding**:
+     - **Current-Generation Evidence Mandate**: Automatic merge and recovery require CURRENT-GENERATION observational evidence (`latest_decision_generation == processing_generation` and `latest_ready_generation == processing_generation`) from EVERY participating leaf. The freshness window $W$ is expiry-only, never authorization to merge unobserved leaves.
+     - **Direct Merge Candidates**: Seeded from parent keys of active leaves in `surviving_batch` that reached `COARSEN_READY` or `COARSEN_READY_PENDING_ACK`. Candidate parent $P$ must be `INTERNAL`, must not conflict with any region split during frame $F$, and all 4 direct children must be active `LEAF` nodes, must not require replay, must exist in `leaf_policy_metadata_`, must have current-generation evidence, must have hysteresis `pending_target_level == P.level` exactly, and `latest_requested_level >= P.level`.
+     - **Complete-Shadow Recovery Candidates**: Seeded from ancestors of frontier leaves in `surviving_batch` with `COARSEN_READY` or `COARSEN_READY_PENDING_ACK` and a real provenance gap (`requiresReplay == true` on a descendant leaf or `base_state == INCOMPLETE` on an intermediate ancestor). Deep topology alone is not a gap. Candidate ancestor $A$ must be `INTERNAL`, must contain a verified provenance gap, must not conflict with split regions, and all descendant frontier leaves must have current-generation evidence and target level $\ge A.\text{level}$.
+  5. **Sibling Readiness Freshness Window ($W$)**:
+     - Configurable via `coarsen_group_max_age_generations` (default: 2; $W=0$ supported).
+     - Age defined as $\text{current\_generation} - \text{latest\_ready\_generation}$.
+     - When an active leaf remains ready without merging for $\text{age} > W$, stale expiration acknowledges the controller with `CoarsenAttemptOutcome::CANCELLED` and resets `latest_ready_generation = 0`, incrementing `stale_ready_cancelled`. Expiration executes before candidate discovery.
+  6. **Restored Parent & Same-Frame Refinement Clean State**:
+     - Restored direct-merge parents and restored recovery ancestors start with NO hysteresis state and NO `LeafPolicyMetadata` until observed in a subsequent frame.
+     - Same-frame newly refined leaves start with NO hysteresis state and NO `LeafPolicyMetadata` until observed in a subsequent frame.
+  7. **Conflict Resolution & Non-Overlapping Deterministic Ordering**:
+     - Candidates are deduplicated and canonically sorted: finer candidates first (`level` ascending: $L1 \rightarrow L2 \rightarrow L3$), direct merge before recovery (`type` ascending), and tie-broken by Morton `CellKey` ascending.
+     - Execution is strictly non-overlapping: committed candidate regions mark their spatial subtrees, precluding conflicting ancestor/descendant candidate executions in the same frame.
+  8. **Safe Block vs Fatal Error Classification**:
+     - **Direct Merge**: `MergeStatus::APPLIED` installs coarsened parent payload, erases children from payload store and hierarchy, cleans child hysteresis states, and records `DIRECT_MERGE`. Safe blocks (`CHILD_NOT_LEAF`, `REPLAY_INCOMPLETE`, `CACHE_HISTORY_INSUFFICIENT`) safely increment `direct_merges_blocked` without fatal latching. Structural corruption, conservation violations, reconstruction mismatches, temporal metadata errors, or payload inconsistencies trigger fatal error latching with `COARSENING_INTERNAL_ERROR`.
+     - **Subtree Recovery Collapse**: `SubtreeCollapseStatus::APPLIED_GAP_CLOSED` restores ancestor leaf, removes fine descendant topology, erases descendant hysteresis states, and records `SUBTREE_RECOVERY_COLLAPSE`. Safe blocks increment `recovery_blocked`. Non-success collapse statuses trigger fatal error latching with `COARSENING_INTERNAL_ERROR`.
+  9. **Metadata OOM Contract**: Allocation failure (`std::bad_alloc`) during post-fusion metadata insertion is FATAL: it latches `fatal_error_latched_ = true` and returns `COARSENING_INTERNAL_ERROR`. Metadata is never silently discarded to continue automatic adaptation.
+  10. **LeafPolicyMetadata Invariants & Snapshot**:
+      - `leafPolicyMetadataSnapshot()` returns a deterministic, canonically sorted vector of key-value pairs (`std::vector<std::pair<CellKey, LeafPolicyMetadata>>`).
+      - Validated before and after coarsening:
+        1. Key must be an active `LEAF` in hierarchy;
+        2. `latest_decision_generation <= processing_generation`;
+        3. `latest_ready_generation <= processing_generation`;
+        4. `latest_requested_level` must be a valid level ($L0 \le l \le L3$);
+        5. If `latest_ready_generation > 0`, region state must exist in hysteresis with `coarsen_action_pending == true`.
+  11. **Zero Out-of-Scope Features**: Semantics, dynamic obstacles, traversability scoring, ROS nodes, and frontend visualizations remain deferred.
+- **Reason**: Completes the autonomous, closed-loop multi-resolution persistent frame pipeline while guaranteeing mathematical exactness, non-overlapping transaction safety, and provable complete-shadow reversibility.
+- **Consequences**: Downstream autonomous navigation and localization modules can ingest continuous LiDAR streams indefinitely without unbounded fine topology memory growth or unverified topology destruction.

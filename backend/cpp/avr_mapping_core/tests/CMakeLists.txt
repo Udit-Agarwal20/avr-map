@@ -46,6 +46,7 @@ add_executable(avr_mapping_tests
   test_persistent_subtree_collapse.cpp
   test_persistent_adaptive_frame_pipeline.cpp
   test_persistent_adaptive_frame_pipeline_stress.cpp
+  test_persistent_adaptive_pipeline_coarsening.cpp
 )
 
 target_link_libraries(avr_mapping_tests

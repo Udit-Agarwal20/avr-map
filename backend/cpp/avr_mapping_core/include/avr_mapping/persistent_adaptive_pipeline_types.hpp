@@ -75,6 +75,9 @@ enum class AdaptivePipelineStatus : uint8_t {
 
   /// Pipeline is permanently latched in fatal error state from an earlier failure. Zero mutation.
   PIPELINE_FATAL_LATCHED = 17,
+
+  /// Automatic coarsening or complete-shadow recovery encountered internal corruption or fatal failure.
+  COARSENING_INTERNAL_ERROR = 18,
 };
 
 [[nodiscard]] constexpr const char* adaptivePipelineStatusToString(
@@ -116,6 +119,8 @@ enum class AdaptivePipelineStatus : uint8_t {
       return "INVARIANT_FAILURE";
     case AdaptivePipelineStatus::PIPELINE_FATAL_LATCHED:
       return "PIPELINE_FATAL_LATCHED";
+    case AdaptivePipelineStatus::COARSENING_INTERNAL_ERROR:
+      return "COARSENING_INTERNAL_ERROR";
   }
   return "UNKNOWN";
 }
@@ -128,6 +133,8 @@ enum class StructuralActionType : uint8_t {
   SPLIT = 1,
   REPLAY_COMPLETE = 2,
   REPLAY_PENDING = 3,
+  DIRECT_MERGE = 4,
+  SUBTREE_RECOVERY_COLLAPSE = 5,
 };
 
 [[nodiscard]] constexpr const char* structuralActionTypeToString(
@@ -141,6 +148,10 @@ enum class StructuralActionType : uint8_t {
       return "REPLAY_COMPLETE";
     case StructuralActionType::REPLAY_PENDING:
       return "REPLAY_PENDING";
+    case StructuralActionType::DIRECT_MERGE:
+      return "DIRECT_MERGE";
+    case StructuralActionType::SUBTREE_RECOVERY_COLLAPSE:
+      return "SUBTREE_RECOVERY_COLLAPSE";
   }
   return "UNKNOWN";
 }
@@ -156,6 +167,18 @@ struct StructuralActionRecord {
   StructuralActionType action_type{StructuralActionType::ROOT_CREATE};
 
   constexpr bool operator==(const StructuralActionRecord&) const noexcept = default;
+};
+
+/**
+ * @brief Persistent leaf policy metadata tracking latest temporal decision and readiness.
+ */
+struct LeafPolicyMetadata {
+  uint64_t latest_decision_generation{0};
+  uint64_t latest_ready_generation{0};
+  uint8_t latest_requested_level{avr::spatial::L0};
+  ResolutionReasonBits latest_reasons{};
+
+  constexpr bool operator==(const LeafPolicyMetadata&) const noexcept = default;
 };
 
 /**
@@ -201,6 +224,16 @@ struct AdaptivePipelineFrameResult {
   uint32_t hysteresis_committed{0};
   uint32_t hysteresis_erased{0};
 
+  uint32_t coarsen_groups_considered{0};
+  uint32_t direct_merge_attempts{0};
+  uint32_t direct_merges_applied{0};
+  uint32_t direct_merges_blocked{0};
+  uint32_t stale_ready_cancelled{0};
+  uint32_t recovery_candidates{0};
+  uint32_t recovery_attempts{0};
+  uint32_t recovery_applied{0};
+  uint32_t recovery_blocked{0};
+
   AdaptivePipelineStatus status{AdaptivePipelineStatus::FRAME_REJECTED_INPUT};
 
   std::vector<PipelineDecisionRecord> decision_records{};
@@ -221,6 +254,7 @@ struct PersistentAdaptivePipelineConfig {
   ResolutionHysteresisConfig hysteresis_config{};
   ReplayCacheConfig replay_cache_config{};
   size_t pool_block_capacity{TilePool::DEFAULT_BLOCK_CAPACITY};
+  uint64_t coarsen_group_max_age_generations{2};
 
   [[nodiscard]] bool isValid() const noexcept {
     return policy_config.validate() &&

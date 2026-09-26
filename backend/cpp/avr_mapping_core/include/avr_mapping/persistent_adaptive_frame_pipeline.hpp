@@ -4,6 +4,8 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "avr_mapping/frame_evidence.hpp"
@@ -21,7 +23,7 @@ namespace avr::mapping {
 /**
  * @brief Autonomous coordinator for the persistent multi-frame adaptive mapping pipeline.
  *
- * Implements M9B3F1 Persistent Adaptive Frame Pipeline V1:
+ * Implements M9B3F1/M9B3F2 Persistent Adaptive Frame Pipeline:
  * - Single-writer coordinator connecting FrameEvidence, ResolutionController,
  *   ResolutionHysteresisController, PersistentAdaptiveMap, and RecentObservationCache.
  * - Staged multi-phase processing per raw LiDAR frame:
@@ -33,7 +35,11 @@ namespace avr::mapping {
  *   6. Immediate direct-parent raw historical replay before deeper child splitting.
  *   7. Full sensor frame fusion into finalized adaptive topology.
  *   8. Post-fusion surviving hysteresis batch commit and structurally removed leaf cleanup.
- *   9. Advancing processing generation and committing staged raw observation frame to cache.
+ *   9. Advancing processing generation and updating persistent leaf policy metadata.
+ *   10. Proactive stale readiness expiration (W-generation window).
+ *   11. Committing staged raw observation frame to cache.
+ *   12. Post-fusion automatic coarsening (direct sibling merges and complete-shadow recovery).
+ *   13. Cross-subsystem policy and map invariant validation.
  *
  * Concurrency & Threading:
  * - Strictly single-writer, non-copyable, and non-movable.
@@ -105,12 +111,19 @@ class PersistentAdaptiveFramePipeline {
     return fatal_error_latched_;
   }
 
+  /**
+   * @brief Returns a deterministic, canonically CellKey-sorted snapshot of all active leaf policy metadata.
+   */
+  [[nodiscard]] std::vector<std::pair<avr::spatial::CellKey, LeafPolicyMetadata>>
+  leafPolicyMetadataSnapshot() const;
+
  private:
   PersistentAdaptiveFramePipeline(
       ResolutionController controller,
       ResolutionHysteresisController hysteresis,
       RecentObservationCache cache,
-      size_t pool_block_capacity);
+      size_t pool_block_capacity,
+      uint64_t coarsen_group_max_age_generations);
 
   // Helper context for recursive localized refinement
   struct RefinementContext {
@@ -120,12 +133,20 @@ class PersistentAdaptiveFramePipeline {
     bool fatal_replay_failure{false};
   };
 
+  enum class CoarsenCandidateType : uint8_t {
+    DIRECT_MERGE = 0,
+    RECOVERY_COLLAPSE = 1,
+  };
+
+  struct CoarsenCandidate {
+    CoarsenCandidateType type{CoarsenCandidateType::DIRECT_MERGE};
+    avr::spatial::CellKey root{};
+    uint8_t level{0};
+    ResolutionReasonBits reasons{};
+  };
+
   /**
    * @brief Pipeline-private recursive localized refinement helper.
-   *
-   * Splits one level at a time, replays direct children if historical parent,
-   * inspects child-local evidence, bounds child decisions, and recurses only into
-   * evidence-bearing children requesting finer resolution.
    */
   bool refineRegionFromEvidence(
       avr::spatial::CellKey region,
@@ -133,13 +154,27 @@ class PersistentAdaptiveFramePipeline {
       bool is_historical_parent,
       RefinementContext& ctx);
 
+  /**
+   * @brief Expires stale READY metadata where (processing_generation - latest_ready_generation) > W.
+   *        Acknowledges hysteresis state with CANCELLED. Returns false if fatal corruption occurs.
+   */
+  bool expireStaleReadyEntries(AdaptivePipelineFrameResult& result);
+
+  /**
+   * @brief Validates all active leaf policy metadata consistency invariants.
+   */
+  [[nodiscard]] bool validatePolicyMetadataInvariants() const noexcept;
+
   FrameEvidence frame_evidence_{};
   ResolutionController resolution_controller_;
   ResolutionHysteresisController hysteresis_;
   PersistentAdaptiveMap persistent_map_;
   RecentObservationCache replay_cache_;
   uint64_t processing_generation_{0};
+  uint64_t coarsen_group_max_age_generations_{2};
   bool fatal_error_latched_{false};
+
+  std::unordered_map<avr::spatial::CellKey, LeafPolicyMetadata> leaf_policy_metadata_{};
 
   // Test-only fault injection flags
   bool test_simulate_fusion_failure_{false};
@@ -148,6 +183,9 @@ class PersistentAdaptiveFramePipeline {
   bool test_simulate_policy_commit_revision_mismatch_{false};
   bool test_simulate_policy_commit_bad_alloc_{false};
   bool test_simulate_invariant_failure_{false};
+  bool test_simulate_metadata_bad_alloc_{false};
+  bool test_simulate_ack_failure_{false};
+  bool test_simulate_coarsen_internal_error_{false};
 
   friend struct PersistentAdaptivePipelineTestAccess;
 };

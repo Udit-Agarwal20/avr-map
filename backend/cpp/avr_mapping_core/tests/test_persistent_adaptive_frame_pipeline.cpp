@@ -44,8 +44,24 @@ struct PersistentAdaptivePipelineTestAccess {
   static void setFatalLatch(PersistentAdaptiveFramePipeline& p, bool v) noexcept {
     p.fatal_error_latched_ = v;
   }
+  static void setSimulateMetadataBadAlloc(PersistentAdaptiveFramePipeline& p, bool v) noexcept {
+    p.test_simulate_metadata_bad_alloc_ = v;
+  }
+  static void setSimulateAckFailure(PersistentAdaptiveFramePipeline& p, bool v) noexcept {
+    p.test_simulate_ack_failure_ = v;
+  }
+  static void setSimulateCoarsenInternalError(PersistentAdaptiveFramePipeline& p, bool v) noexcept {
+    p.test_simulate_coarsen_internal_error_ = v;
+  }
   static ResolutionHysteresisController& getHysteresis(PersistentAdaptiveFramePipeline& p) noexcept {
     return p.hysteresis_;
+  }
+  static PersistentAdaptiveMap& getMap(PersistentAdaptiveFramePipeline& p) noexcept {
+    return p.persistent_map_;
+  }
+  static std::unordered_map<avr::spatial::CellKey, LeafPolicyMetadata>& getLeafPolicyMetadata(
+      PersistentAdaptiveFramePipeline& p) noexcept {
+    return p.leaf_policy_metadata_;
   }
 };
 
