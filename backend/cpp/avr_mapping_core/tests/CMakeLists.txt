@@ -29,10 +29,12 @@ add_executable(avr_mapping_tests
   test_recent_observation_spatial_index.cpp
   test_recent_observation_cache_stress.cpp
   test_recent_observation_cache_staged.cpp
+  test_recent_observation_cache_routing.cpp
   test_persistent_replay.cpp
   test_persistent_replay_completeness.cpp
   test_persistent_replay_transaction.cpp
   test_persistent_replay_stress.cpp
+  test_persistent_replay_routing.cpp
   test_persistent_merge.cpp
   test_persistent_merge_transaction.cpp
   test_persistent_merge_stress.cpp

@@ -252,7 +252,7 @@ PersistentMergeResult PersistentAdaptiveMap::mergeDirectChildrenImpl(
       // Reconstruct 4 direct children for this frame
       for (size_t c = 0; c < 4; ++c) {
         std::vector<RecentObservationCache::PointIndex> c_indices;
-        if (!cache->collectObservationIndices(frame_seq, children[c], c_indices)) {
+        if (!cache->collectStaticFusableObservationIndices(frame_seq, children[c], c_indices)) {
           result.status = MergeStatus::INTERNAL_ERROR;
           return result;
         }
@@ -282,7 +282,7 @@ PersistentMergeResult PersistentAdaptiveMap::mergeDirectChildrenImpl(
 
       // Reconstruct candidate parent for this frame
       std::vector<RecentObservationCache::PointIndex> p_indices;
-      if (!cache->collectObservationIndices(frame_seq, parent, p_indices)) {
+      if (!cache->collectStaticFusableObservationIndices(frame_seq, parent, p_indices)) {
         result.status = MergeStatus::INTERNAL_ERROR;
         return result;
       }

@@ -63,10 +63,13 @@ struct ReplayCacheFrameStats {
   uint64_t replay_candidates{0};
   uint64_t non_finite_unindexed{0};
   uint64_t out_of_range_unindexed{0};
+  uint64_t static_fusable_indexed{0};
+  uint64_t dynamic_excluded_indexed{0};
   size_t bucket_count{0};
   uint64_t point_indices_count{0};
   size_t raw_point_bytes{0};
   size_t index_bytes{0};
+  size_t routing_bytes{0};
 
   constexpr bool operator==(const ReplayCacheFrameStats&) const noexcept = default;
   constexpr bool operator!=(const ReplayCacheFrameStats&) const noexcept = default;
@@ -84,12 +87,15 @@ struct ReplayCacheStats {
   uint64_t total_frames_pushed{0};
   uint64_t stored_raw_points{0};
   uint64_t stored_replay_candidates{0};
+  uint64_t stored_static_fusable{0};
+  uint64_t stored_dynamic_excluded{0};
   size_t stored_bucket_count{0};
   uint64_t stored_point_indices{0};
   std::optional<uint64_t> oldest_frame_seq{std::nullopt};
   std::optional<uint64_t> newest_frame_seq{std::nullopt};
   size_t raw_point_payload_bytes{0};
   size_t index_payload_bytes{0};
+  size_t routing_payload_bytes{0};
 
   constexpr bool operator==(const ReplayCacheStats&) const noexcept = default;
   constexpr bool operator!=(const ReplayCacheStats&) const noexcept = default;

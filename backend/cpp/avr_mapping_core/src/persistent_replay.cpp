@@ -112,7 +112,7 @@ ReplayReconstructionResult PersistentAdaptiveMap::replayDirectChildren(
     ++result.cached_frames_considered;
 
     std::vector<RecentObservationCache::PointIndex> parent_indices;
-    if (!cache.collectObservationIndices(frame_seq, parent, parent_indices)) {
+    if (!cache.collectStaticFusableObservationIndices(frame_seq, parent, parent_indices)) {
       result.status = ReplayStatus::INTERNAL_ERROR;
       return result;
     }
@@ -178,7 +178,7 @@ ReplayReconstructionResult PersistentAdaptiveMap::replayDirectChildren(
       }
 
       std::vector<RecentObservationCache::PointIndex> child_indices;
-      if (!cache.collectObservationIndices(frame_seq, child_key, child_indices)) {
+      if (!cache.collectStaticFusableObservationIndices(frame_seq, child_key, child_indices)) {
         result.status = ReplayStatus::INTERNAL_ERROR;
         return result;
       }

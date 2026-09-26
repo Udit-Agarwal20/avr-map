@@ -69,6 +69,37 @@ class RecentObservationCache {
    * @param sensor_origin Sensor position in world coordinates (must be finite).
    * @return PreparedCachedObservationFrame on success, std::nullopt on any validation failure.
    */
+  /**
+   * @brief Staged preparation phase with explicit routing decisions.
+   *
+   * @param raw_points Raw sensor input points.
+   * @param routing Routing decisions aligned 1-to-1 with raw_points.
+   * @param frame_seq Global sequence number (must be > newestFrameSeq if cache is non-empty).
+   * @param sensor_origin Sensor position in world coordinates (must be finite).
+   * @return PreparedCachedObservationFrame on success, std::nullopt on any validation failure.
+   */
+  [[nodiscard]] std::optional<PreparedCachedObservationFrame> prepareFrame(
+      std::span<const PointXYZ> raw_points,
+      std::span<const PointRouting> routing,
+      uint64_t frame_seq,
+      avr::spatial::WorldPoint2D sensor_origin) const;
+
+  /**
+   * @brief Staged preparation phase: validates and constructs candidate frame with default STATIC_FUSABLE routing.
+   *
+   * Invariants:
+   * - Strictly side-effect-free: performs zero mutations to RecentObservationCache.
+   * - Does NOT evict oldest retained frames, change frame count, or advance statistics.
+   * - Does NOT invalidate any borrowed pointers previously returned by findFrame().
+   * - Finite sensor-origin validation is frame-fatal; individual non-finite raw points are retained but unindexed.
+   * - Validates point limits (<= UINT32_MAX) and partitions points via CachedObservationFrame::create.
+   * - Validates frame_seq > newest retained frame if cache is non-empty.
+   *
+   * @param raw_points Raw sensor input points.
+   * @param frame_seq Global sequence number (must be > newestFrameSeq if cache is non-empty).
+   * @param sensor_origin Sensor position in world coordinates (must be finite).
+   * @return PreparedCachedObservationFrame on success, std::nullopt on any validation failure.
+   */
   [[nodiscard]] std::optional<PreparedCachedObservationFrame> prepareFrame(
       std::span<const PointXYZ> raw_points,
       uint64_t frame_seq,
@@ -89,6 +120,12 @@ class RecentObservationCache {
    */
   std::optional<ReplayCacheFrameStats> commitPreparedFrame(
       PreparedCachedObservationFrame&& prepared);
+
+  std::optional<ReplayCacheFrameStats> pushFrame(
+      std::span<const PointXYZ> raw_points,
+      std::span<const PointRouting> routing,
+      uint64_t frame_seq,
+      avr::spatial::WorldPoint2D sensor_origin);
 
   std::optional<ReplayCacheFrameStats> pushFrame(
       std::span<const PointXYZ> raw_points,
@@ -143,6 +180,21 @@ class RecentObservationCache {
    * @return true if query is valid, false on query failure.
    */
   bool collectObservationIndices(
+      uint64_t frame_seq,
+      const avr::spatial::CellKey& region,
+      std::vector<PointIndex>& output) const;
+
+  /**
+   * @brief Queries matching STATIC_FUSABLE point indices in a given cached frame for an L0-L3 CellKey.
+   *
+   * Filters out DYNAMIC_EXCLUDED points to guarantee static map replay purity.
+   *
+   * @param frame_seq Target cached frame sequence number.
+   * @param region Valid L0-L3 CellKey region.
+   * @param output Vector to receive matching indices in original observation arrival order.
+   * @return true if query is valid, false on query failure.
+   */
+  bool collectStaticFusableObservationIndices(
       uint64_t frame_seq,
       const avr::spatial::CellKey& region,
       std::vector<PointIndex>& output) const;

@@ -17,6 +17,7 @@ RecentObservationCache::RecentObservationCache(ReplayCacheConfig config) noexcep
 
 std::optional<PreparedCachedObservationFrame> RecentObservationCache::prepareFrame(
     std::span<const PointXYZ> raw_points,
+    std::span<const PointRouting> routing,
     uint64_t frame_seq,
     avr::spatial::WorldPoint2D sensor_origin) const {
   // 1. Frame order check: strictly increasing frame_seq relative to current newest frame
@@ -24,7 +25,26 @@ std::optional<PreparedCachedObservationFrame> RecentObservationCache::prepareFra
     return std::nullopt;
   }
 
-  // 2. Prepare candidate frame in self-contained object
+  // 2. Prepare candidate frame with routing in self-contained object
+  auto frame_opt = CachedObservationFrame::create(raw_points, routing, frame_seq, sensor_origin);
+  if (!frame_opt.has_value()) {
+    // Non-finite sensor origin, point count > UINT32_MAX, size mismatch, or invalid enum
+    return std::nullopt;
+  }
+
+  return PreparedCachedObservationFrame(std::move(*frame_opt));
+}
+
+std::optional<PreparedCachedObservationFrame> RecentObservationCache::prepareFrame(
+    std::span<const PointXYZ> raw_points,
+    uint64_t frame_seq,
+    avr::spatial::WorldPoint2D sensor_origin) const {
+  // 1. Frame order check: strictly increasing frame_seq relative to current newest frame
+  if (!frames_.empty() && frame_seq <= frames_.back().frameSeq()) {
+    return std::nullopt;
+  }
+
+  // 2. Prepare candidate frame in self-contained object with default STATIC_FUSABLE routing
   auto frame_opt = CachedObservationFrame::create(raw_points, frame_seq, sensor_origin);
   if (!frame_opt.has_value()) {
     // Non-finite sensor origin or point count > UINT32_MAX
@@ -61,6 +81,18 @@ std::optional<ReplayCacheFrameStats> RecentObservationCache::commitPreparedFrame
   ++total_frames_pushed_;
 
   return stats;
+}
+
+std::optional<ReplayCacheFrameStats> RecentObservationCache::pushFrame(
+    std::span<const PointXYZ> raw_points,
+    std::span<const PointRouting> routing,
+    uint64_t frame_seq,
+    avr::spatial::WorldPoint2D sensor_origin) {
+  auto prepared = prepareFrame(raw_points, routing, frame_seq, sensor_origin);
+  if (!prepared.has_value()) {
+    return std::nullopt;
+  }
+  return commitPreparedFrame(std::move(*prepared));
 }
 
 std::optional<ReplayCacheFrameStats> RecentObservationCache::pushFrame(
@@ -130,6 +162,18 @@ bool RecentObservationCache::collectObservationIndices(
   return frame->collectObservationIndices(region, output);
 }
 
+bool RecentObservationCache::collectStaticFusableObservationIndices(
+    uint64_t frame_seq,
+    const avr::spatial::CellKey& region,
+    std::vector<PointIndex>& output) const {
+  const auto* frame = findFrame(frame_seq);
+  if (!frame) {
+    output.clear();
+    return false;
+  }
+  return frame->collectStaticFusableObservationIndices(region, output);
+}
+
 ReplayCacheStats RecentObservationCache::statistics() const noexcept {
   ReplayCacheStats stats{};
   stats.max_frames = config_.max_frames;
@@ -143,10 +187,13 @@ ReplayCacheStats RecentObservationCache::statistics() const noexcept {
     const auto& fstats = frame.statistics();
     stats.stored_raw_points = saturatingAddU64(stats.stored_raw_points, fstats.input_points);
     stats.stored_replay_candidates = saturatingAddU64(stats.stored_replay_candidates, fstats.replay_candidates);
+    stats.stored_static_fusable = saturatingAddU64(stats.stored_static_fusable, fstats.static_fusable_indexed);
+    stats.stored_dynamic_excluded = saturatingAddU64(stats.stored_dynamic_excluded, fstats.dynamic_excluded_indexed);
     stats.stored_bucket_count = saturatingAdd(stats.stored_bucket_count, fstats.bucket_count);
     stats.stored_point_indices = saturatingAddU64(stats.stored_point_indices, fstats.point_indices_count);
     stats.raw_point_payload_bytes = saturatingAdd(stats.raw_point_payload_bytes, fstats.raw_point_bytes);
     stats.index_payload_bytes = saturatingAdd(stats.index_payload_bytes, fstats.index_bytes);
+    stats.routing_payload_bytes = saturatingAdd(stats.routing_payload_bytes, fstats.routing_bytes);
   }
   return stats;
 }

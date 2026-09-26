@@ -947,7 +947,7 @@ TEST(RecentObservationCacheStagedTest, PreparedFrameSizeAndAlignment) {
   constexpr size_t kSize = sizeof(PreparedCachedObservationFrame);
   constexpr size_t kAlign = alignof(PreparedCachedObservationFrame);
 
-  EXPECT_EQ(kSize, 168ULL);
+  EXPECT_EQ(kSize, 216ULL);
   EXPECT_EQ(kAlign, 8ULL);
 }
 

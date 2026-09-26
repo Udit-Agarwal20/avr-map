@@ -623,3 +623,59 @@ This document records architectural and implementation decisions for the **AVR-M
   11. **Zero Out-of-Scope Features**: Semantics, dynamic obstacles, traversability scoring, ROS nodes, and frontend visualizations remain deferred.
 - **Reason**: Completes the autonomous, closed-loop multi-resolution persistent frame pipeline while guaranteeing mathematical exactness, non-overlapping transaction safety, and provable complete-shadow reversibility.
 - **Consequences**: Downstream autonomous navigation and localization modules can ingest continuous LiDAR streams indefinitely without unbounded fine topology memory growth or unverified topology destruction.
+
+---
+
+## ADR-023: Replay-Safe Static-Fusion Routing Provenance
+
+- **Status**: Accepted
+- **Context**:
+  Milestone 10A completed the architecture audit for semantic perception and dynamic obstacle integration. A critical architectural invariant identified in that audit is that points classified as dynamic must not enter the persistent static map. Furthermore, because fine map regions may undergo adaptive structural refinement (`splitLeaf`) and historical cache replay (`replayDirectChildren`) long after original frame ingestion, any point excluded from static map fusion during frame ingestion must remain excluded during all future historical replays.
+  Milestone 10B1 implements this exact routing provenance primitive in isolation, without coupling to semantic inference, machine learning models, or dynamic obstacle tracking pipelines.
+- **Decisions**:
+  1. **Strict Separation of Geometry Validity and Static-Fusion Routing**:
+     - Geometry validity remains exclusively determined by finite coordinates (`!isnan`, `!isinf`), bounding box range (`kMinValidWorldCoord` to `kMaxValidWorldCoord`), and spatial grid bounds.
+     - Static-fusion routing is orthogonal to geometry validity: it answers strictly whether a geometrically valid observation was authorized to enter the persistent static map.
+     - A routing flag can never make invalid geometry replayable. Points with NaN, Inf, or out-of-range coordinates remain unindexed and unrepayable regardless of routing value.
+     - Refinement from M10A audit: `INVALID` geometry is NOT an enum state of `PointRouting`. Geometry validation owns invalid/unindexed status independently.
+  2. **PointRouting Enum Definition**:
+     ```cpp
+     enum class PointRouting : uint8_t {
+       STATIC_FUSABLE = 0,
+       DYNAMIC_EXCLUDED = 1,
+     };
+     ```
+     Only values `0` and `1` are valid. Any other value fails validation immediately during frame preparation with zero cache mutation.
+  3. **Legacy API Preservation and Default Routing**:
+     - Existing APIs (`prepareFrame`, `pushFrame`) that omit routing parameters default to `PointRouting::STATIC_FUSABLE` for all raw points.
+     - Geometrically invalid points still remain unindexed.
+     - Frozen M8A/M9B3 callers and test suites retain 100% behavioral equivalence.
+  4. **Routed Frame Preparation API & Strict Validation**:
+     - New overloads accept `std::span<const PointRouting> routing`.
+     - Invariant: `routing.size() == raw_points.size()`. Any mismatch causes immediate prepare failure with zero cache mutation.
+     - Every element in `routing` is verified using `isValidPointRouting`. Any invalid enum cast fails preparation with zero mutation.
+  5. **Routing Provenance Ownership and Storage**:
+     - `PreparedCachedObservationFrame` and `CachedObservationFrame` own routing provenance by value (`std::vector<PointRouting>`).
+     - Caller may mutate or destroy original routing inputs after `prepareFrame` without affecting the prepared or committed frame.
+     - Raw points and routing vectors maintain identical indexing and arrival order: `routing_[i]` describes `raw_points_[i]`.
+  6. **Raw Point Retention**:
+     - `DYNAMIC_EXCLUDED` points are retained in `raw_points_` to preserve raw frame fidelity for future perception and diagnostics.
+  7. **Spatial Indexing Policy**:
+     - Geometrically valid `DYNAMIC_EXCLUDED` points remain indexed in existing multi-resolution spatial buckets (`CellKey` to `PointIndex`). The spatial bucket index remains an authoritative geometry index.
+     - Frozen `collectObservationIndices` semantics are strictly preserved for general spatial retrieval and diagnostics.
+  8. **Explicit Static-Fusion Collection API**:
+     - Added `collectStaticFusableObservationIndices(region, output)` on `CachedObservationFrame` and `RecentObservationCache`.
+     - Returns only indices that are both geometrically valid/indexed and have `PointRouting::STATIC_FUSABLE`.
+  9. **Persistent Replay Uses Static-Fusion Collection Exclusively**:
+     - `PersistentAdaptiveMap::replayDirectChildren` and `PersistentAdaptiveMap::mergeDirectChildren` query `collectStaticFusableObservationIndices`.
+     - `DYNAMIC_EXCLUDED` observations can never enter `ElevationStats`, `AdaptiveCellPayload`, coarsening shadows, or reconstructed child payloads.
+  10. **Immutable Provenance at Ingestion**:
+      - Once committed to `RecentObservationCache`, routing provenance is immutable. No API supports in-place reclassification or rewriting of historical frames.
+  11. **Temporal Payload Preservation**:
+      - Frames containing only `DYNAMIC_EXCLUDED` points for a parent cell return empty static indices and are bypassed during replay, preserving `first_seen_frame`, `last_seen_frame`, and `observed_frame_count` invariants.
+  12. **Bounded Cache and Eviction Limitations Preserved**:
+      - Routing provenance shares the bounded FIFO lifetime of the raw observation cache. If historical frames have been evicted, replay returns `CACHE_HISTORY_INSUFFICIENT`, and ancestor complete shadows remain the authoritative recovery mechanism.
+  13. **Zero Semantic Code / Geometry-Only Pipeline**:
+      - `PersistentAdaptiveFramePipeline` continues operating in geometry-only mode using default static routing. Semantic providers, PointNet++, clustering, tracking, and dynamic sinks remain deferred to M10B2+.
+- **Reason**: Guarantees that dynamic point exclusion decisions are preserved immutably across all future multi-resolution map adaptations, resolving the dynamic replay contamination hazard at the root provenance level.
+- **Consequences**: Enables safe integration of upstream dynamic obstacle filters while ensuring existing frozen geometry pipelines, replay reconstruction, and shadow coarsening remain 100% bitwise and behaviorally identical.
