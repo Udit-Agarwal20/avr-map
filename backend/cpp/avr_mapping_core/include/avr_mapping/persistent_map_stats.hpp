@@ -7,6 +7,7 @@
 #include "avr_mapping/adaptive_cell_payload.hpp"
 #include "avr_mapping/adaptive_payload_tile.hpp"
 #include "avr_mapping/hierarchy_stats.hpp"
+#include "avr_mapping/internal_coarsening_state.hpp"
 
 namespace avr::mapping {
 
@@ -48,6 +49,12 @@ struct PersistentFusionStats {
   size_t replay_required_leaf_count{0};
   uint64_t last_fused_frame_seq{0};
 
+  // M9B2A ancestor shadow fusion diagnostics (duplicate structural summaries)
+  size_t internal_ancestors_considered{0};
+  size_t internal_shadows_created{0};
+  size_t internal_shadows_updated{0};
+  uint64_t internal_shadow_observations_summarized{0};
+
   bool operator==(const PersistentFusionStats&) const noexcept = default;
   bool operator!=(const PersistentFusionStats&) const noexcept = default;
 };
@@ -58,6 +65,7 @@ struct PersistentFusionStats {
 struct PersistentMapStats {
   HierarchyStats hierarchy_stats{};
   PayloadStoreStats payload_stats{};
+  InternalCoarseningStats coarsening_stats{};
   uint64_t last_fused_frame_seq{0};
   bool has_fused_frames{false};
 
@@ -70,6 +78,7 @@ struct PersistentMapStats {
            total_frames_fused == other.total_frames_fused &&
            total_observations_fused == other.total_observations_fused &&
            payload_stats == other.payload_stats &&
+           coarsening_stats == other.coarsening_stats &&
            hierarchy_stats.tile_count == other.hierarchy_stats.tile_count &&
            hierarchy_stats.node_count == other.hierarchy_stats.node_count &&
            hierarchy_stats.leaf_count == other.hierarchy_stats.leaf_count &&
@@ -108,6 +117,15 @@ enum class PersistentMapValidationCode : uint8_t {
   REPLAY_REQUIRED_ON_NON_LEAF = 19,
   GLOBAL_FRAME_SEQUENCING_INCONSISTENT = 20,
   INVALID_LOCAL_INDEX = 21,
+  INTERNAL_NODE_MISSING_COARSENING_STATE = 22,
+  COARSENING_STATE_ON_NON_INTERNAL = 23,
+  COARSENING_BASE_RETIRED_CACHE_MISSING = 24,
+  COARSENING_BASE_EMPTY_HAS_RETIRED_CACHE = 25,
+  COARSENING_SHADOW_OBSERVATIONS_INVALID = 26,
+  COARSENING_SHADOW_FRAME_ORDER_INVALID = 27,
+  COARSENING_SHADOW_FRAME_COUNT_INVALID = 28,
+  COARSENING_SHADOW_POINT_COUNT_INVALID = 29,
+  COARSENING_SHADOW_TEMPORALLY_PRECEDES_BASE = 30,
 };
 
 /**

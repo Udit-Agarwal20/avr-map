@@ -29,7 +29,6 @@ struct PersistentAdaptiveMapTestAccess {
 
 TEST(PersistentMergeTest, BasicEmptyMergeTest) {
   PersistentAdaptiveMap map{};
-  const auto origin = avr::spatial::WorldPoint2D{0.0, 0.0};
 
   // Base root L3 covers [0.0, 0.40) x [0.0, 0.40)
   const auto root_key = *avr::spatial::CellKey::fromGridCoord(avr::spatial::GridCoord2D{0, 0}, avr::spatial::L3);
@@ -901,7 +900,7 @@ TEST(PersistentMergeTest, DeterminismAcrossFreshInstances) {
 // Section 50: No-Cache Non-Empty Merge Rejected (Zero Mutation)
 // ============================================================================
 
-TEST(PersistentMergeTest, NoCacheNonEmptyMergeRejected) {
+TEST(PersistentMergeTest, StrictCacheInsufficientHistoryRejectedAndNoCacheSucceeds) {
   PersistentAdaptiveMap map{};
   auto cache_opt = RecentObservationCache::create(ReplayCacheConfig{.max_frames = 10});
   ASSERT_TRUE(cache_opt.has_value());
@@ -928,18 +927,20 @@ TEST(PersistentMergeTest, NoCacheNonEmptyMergeRejected) {
   // At least one child has ACTIVE_PAYLOAD
   EXPECT_NE(map.findActivePayload(children[0]), nullptr);
 
-  // Capture snapshots before no-cache merge call
+  // Capture snapshots before merge call
   const auto pre_active = map.activePayloadSnapshot();
   const auto pre_retired = map.retiredCacheSnapshot();
   const auto pre_replay = map.replayRequiredSnapshot();
   const auto pre_stats = map.statistics();
 
-  // Call no-cache overload: MUST reject non-empty merge with zero mutation
-  const auto merge_res = map.mergeDirectChildren(root_key);
-  EXPECT_EQ(merge_res.status, MergeStatus::CACHE_HISTORY_INSUFFICIENT);
-  EXPECT_FALSE(merge_res.isSuccess());
+  // Call strict cache overload with insufficient cache (empty cache): MUST reject with zero mutation
+  auto empty_cache_opt = RecentObservationCache::create(ReplayCacheConfig{.max_frames = 10});
+  ASSERT_TRUE(empty_cache_opt.has_value());
+  const auto rejected_res = map.mergeDirectChildren(root_key, *empty_cache_opt);
+  EXPECT_EQ(rejected_res.status, MergeStatus::CACHE_HISTORY_INSUFFICIENT);
+  EXPECT_FALSE(rejected_res.isSuccess());
 
-  // Zero mutation verification
+  // Zero mutation verification after rejected strict cache call
   EXPECT_TRUE(map.hierarchy().isInternal(root_key));
   for (const auto& child : children) {
     EXPECT_TRUE(map.hierarchy().isLeaf(child));
@@ -949,9 +950,15 @@ TEST(PersistentMergeTest, NoCacheNonEmptyMergeRejected) {
   EXPECT_EQ(map.retiredCacheSnapshot(), pre_retired);
   EXPECT_EQ(map.replayRequiredSnapshot(), pre_replay);
   EXPECT_EQ(map.statistics(), pre_stats);
+  EXPECT_TRUE(map.validateInvariants().is_valid);
 
-  const auto val = map.validateInvariants();
-  EXPECT_TRUE(val.is_valid) << val.error_message;
+  // M9B2A Section 35: Operational no-cache overload succeeds from internal coarsening shadow!
+  const auto merge_res = map.mergeDirectChildren(root_key);
+  EXPECT_EQ(merge_res.status, MergeStatus::APPLIED);
+  EXPECT_TRUE(merge_res.isSuccess());
+  EXPECT_TRUE(map.hierarchy().isLeaf(root_key));
+  EXPECT_NE(map.findActivePayload(root_key), nullptr);
+  EXPECT_TRUE(map.validateInvariants().is_valid);
 }
 
 // ============================================================================

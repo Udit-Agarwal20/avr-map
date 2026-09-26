@@ -25,6 +25,7 @@ enum class MergeStatus : uint8_t {
   PAYLOAD_MERGE_FAILED = 9,
   INCONSISTENT_PAYLOAD_STATE = 10,
   INTERNAL_ERROR = 11,
+  PARENT_RECONSTRUCTION_MISMATCH = 12,
 };
 
 [[nodiscard]] constexpr std::string_view mergeStatusToString(MergeStatus status) noexcept {
@@ -53,6 +54,8 @@ enum class MergeStatus : uint8_t {
       return "INCONSISTENT_PAYLOAD_STATE";
     case MergeStatus::INTERNAL_ERROR:
       return "INTERNAL_ERROR";
+    case MergeStatus::PARENT_RECONSTRUCTION_MISMATCH:
+      return "PARENT_RECONSTRUCTION_MISMATCH";
   }
   return "UNKNOWN";
 }

@@ -31,25 +31,30 @@ bool PersistentAdaptiveMap::splitLeaf(
     return false;
   }
 
-  // 3. Under valid invariants, a leaf MUST NOT already have a retired cache.
-  if (payload_store_.findRetiredCache(parent_key) != nullptr) {
+  // 3. Under valid invariants, a leaf MUST NOT already have a retired cache or coarsening state.
+  if (payload_store_.findRetiredCache(parent_key) != nullptr ||
+      internal_coarsening_states_.find(parent_key) != internal_coarsening_states_.end()) {
     return false;
   }
 
   // 4. Under valid invariants, children must be currently ABSENT in hierarchy,
-  //    and must NOT have active payload, retired cache, or replay-required bits.
+  //    and must NOT have active payload, retired cache, replay-required bits, or coarsening state.
   for (const auto& child : *children_opt) {
     if (hierarchy_.nodeState(child) != NodeState::ABSENT) {
       return false;
     }
     if (payload_store_.findActivePayload(child) != nullptr ||
         payload_store_.findRetiredCache(child) != nullptr ||
-        payload_store_.requiresReplay(child)) {
+        payload_store_.requiresReplay(child) ||
+        internal_coarsening_states_.find(child) != internal_coarsening_states_.end()) {
       return false;
     }
   }
 
-  // Check parent payload state prior to structural split
+  // Check parent payload and coarsening state prior to structural split
+  if (internal_coarsening_states_.find(parent_key) != internal_coarsening_states_.end()) {
+    return false;
+  }
   const auto* active_payload = payload_store_.findActivePayload(parent_key);
   const bool has_active_payload = (active_payload != nullptr && active_payload->hasObservations());
   const AdaptiveCellPayload parent_payload_copy =
@@ -91,6 +96,23 @@ bool PersistentAdaptiveMap::splitLeaf(
       // Children have no payload and are not replay-required.
     }
   }
+
+  // Coordinate internal coarsening state creation (Sections 6, 12, 13, 14, 15)
+  CoarseningBaseState base_state = CoarseningBaseState::COMPLETE_EMPTY;
+  if (has_active_payload) {
+    base_state = parent_was_replay_required ? CoarseningBaseState::INCOMPLETE
+                                            : CoarseningBaseState::COMPLETE_RETIRED_CACHE;
+  } else if (parent_was_replay_required) {
+    base_state = CoarseningBaseState::INCOMPLETE;
+  } else {
+    base_state = CoarseningBaseState::COMPLETE_EMPTY;
+  }
+
+  internal_coarsening_states_[parent_key] = InternalCoarseningState{
+      .base_state = base_state,
+      .has_current_shadow = false,
+      .current_shadow = AdaptiveCellPayload{},
+  };
 
   payload_store_.pruneEmptyTiles();
   return true;
@@ -201,6 +223,91 @@ std::optional<PersistentFusionStats> PersistentAdaptiveMap::fuseFrameEvidence(
   std::sort(owning_leaves.begin(), owning_leaves.end());
   owning_leaves.erase(std::unique(owning_leaves.begin(), owning_leaves.end()), owning_leaves.end());
 
+  // Section 19 & 20: Ancestor Discovery and Canonical Ancestor Order
+  // Walk parentOf(...) up through hierarchy from each touched active leaf.
+  // Collect only nodes currently NodeState::INTERNAL.
+  // Deduplicate all ancestor CellKeys deterministically and sort canonically.
+  std::vector<avr::spatial::CellKey> ancestor_keys;
+  for (const auto& leaf_key : owning_leaves) {
+    auto current = leaf_key;
+    while (current.level < avr::spatial::L3) {
+      const auto p_opt = avr::spatial::parentOf(current);
+      if (!p_opt.has_value()) {
+        break;
+      }
+      const auto parent_key = *p_opt;
+      if (hierarchy_.nodeState(parent_key) == NodeState::INTERNAL) {
+        ancestor_keys.push_back(parent_key);
+      }
+      current = parent_key;
+    }
+  }
+  std::sort(ancestor_keys.begin(), ancestor_keys.end());
+  ancestor_keys.erase(std::unique(ancestor_keys.begin(), ancestor_keys.end()), ancestor_keys.end());
+
+  struct CandidateShadowUpdate {
+    avr::spatial::CellKey key;
+    AdaptiveCellPayload shadow;
+    bool is_created{false};
+    uint64_t observations{0};
+  };
+
+  std::vector<CandidateShadowUpdate> shadow_candidates;
+  shadow_candidates.reserve(ancestor_keys.size());
+  const size_t ancestors_considered = ancestor_keys.size();
+
+  // Section 16, 17, 18, 21: Candidate Shadow Preparation
+  for (const auto& ancestor_key : ancestor_keys) {
+    const auto frame_elev_opt = evidence.aggregateElevationStats(ancestor_key);
+    if (!frame_elev_opt.has_value() || frame_elev_opt->count() == 0) {
+      // Section 18: No update for zero-contribution frame
+      continue;
+    }
+
+    const auto& frame_elev = *frame_elev_opt;
+    const auto it = internal_coarsening_states_.find(ancestor_key);
+    if (it == internal_coarsening_states_.end()) {
+      return std::nullopt;
+    }
+
+    AdaptiveCellPayload cand_shadow;
+    bool is_created = false;
+    if (!it->second.has_current_shadow) {
+      is_created = true;
+      if (it->second.base_state == CoarseningBaseState::COMPLETE_RETIRED_CACHE) {
+        const auto* retired = payload_store_.findRetiredCache(ancestor_key);
+        if (retired == nullptr || !retired->hasObservations()) {
+          return std::nullopt;
+        }
+        cand_shadow = *retired;
+      } else if (it->second.base_state == CoarseningBaseState::COMPLETE_EMPTY) {
+        cand_shadow = AdaptiveCellPayload{};
+      } else if (it->second.base_state == CoarseningBaseState::INCOMPLETE) {
+        const auto* retired = payload_store_.findRetiredCache(ancestor_key);
+        if (retired != nullptr && retired->hasObservations()) {
+          cand_shadow = *retired;
+        } else {
+          cand_shadow = AdaptiveCellPayload{};
+        }
+      }
+    } else {
+      cand_shadow = it->second.current_shadow;
+    }
+
+    // Shadow last_update_reasons is NOT authoritative (Section 9)
+    if (!cand_shadow.tryFuse(frame_elev, frame_seq, ResolutionReasonBits{})) {
+      // Numerical failure, overflow, or frame ordering violation
+      return std::nullopt;
+    }
+
+    shadow_candidates.push_back(CandidateShadowUpdate{
+        .key = ancestor_key,
+        .shadow = cand_shadow,
+        .is_created = is_created,
+        .observations = frame_elev.count(),
+    });
+  }
+
   struct CandidateUpdate {
     avr::spatial::CellKey key;
     AdaptiveCellPayload payload;
@@ -273,13 +380,33 @@ std::optional<PersistentFusionStats> PersistentAdaptiveMap::fuseFrameEvidence(
     }
   }
 
-  // 3. Publish frame sequencing state and cumulative counters only AFTER commits succeed
+  // 3. Commit internal shadow candidates (Section 27)
+  size_t shadows_created = 0;
+  size_t shadows_updated = 0;
+  uint64_t shadow_observations_summarized = 0;
+
+  for (const auto& sc : shadow_candidates) {
+    auto it = internal_coarsening_states_.find(sc.key);
+    if (it != internal_coarsening_states_.end()) {
+      it->second.current_shadow = sc.shadow;
+      it->second.has_current_shadow = true;
+    }
+    if (sc.is_created) {
+      ++shadows_created;
+    } else {
+      ++shadows_updated;
+    }
+    shadow_observations_summarized += sc.observations;
+  }
+
+  // 4. Publish frame sequencing state and cumulative counters only AFTER commits succeed
+  // Note: Shadow updates do NOT increment total_observations_fused_ (Section 28)
   last_fused_frame_seq_ = frame_seq;
   has_fused_frames_ = true;
   ++total_frames_fused_;
   total_observations_fused_ += total_observations_fused;
 
-  // 4. Assemble statistics
+  // 5. Assemble statistics
   const auto store_stats = payload_store_.statistics();
   PersistentFusionStats stats{
       .frame_seq = frame_seq,
@@ -296,6 +423,10 @@ std::optional<PersistentFusionStats> PersistentAdaptiveMap::fuseFrameEvidence(
       .retired_cache_cells = store_stats.retired_cache_count,
       .replay_required_leaf_count = store_stats.replay_required_count,
       .last_fused_frame_seq = last_fused_frame_seq_,
+      .internal_ancestors_considered = ancestors_considered,
+      .internal_shadows_created = shadows_created,
+      .internal_shadows_updated = shadows_updated,
+      .internal_shadow_observations_summarized = shadow_observations_summarized,
   };
 
   return stats;
@@ -486,6 +617,123 @@ PersistentMapValidationResult PersistentAdaptiveMap::validateInvariants() const 
     };
   }
 
+  // A. Every INTERNAL hierarchy node has exactly one InternalCoarseningState
+  const auto topo_nodes = hierarchy_.topologySnapshot();
+  for (const auto& node : topo_nodes) {
+    if (node.state == NodeState::INTERNAL) {
+      if (internal_coarsening_states_.find(node.key) == internal_coarsening_states_.end()) {
+        return PersistentMapValidationResult{
+            .is_valid = false,
+            .code = PersistentMapValidationCode::INTERNAL_NODE_MISSING_COARSENING_STATE,
+            .error_message = "INTERNAL hierarchy node missing InternalCoarseningState",
+        };
+      }
+    }
+  }
+
+  // B & C. No LEAF or ABSENT node owns InternalCoarseningState, plus D-H base and shadow constraints
+  for (const auto& [key, state] : internal_coarsening_states_) {
+    const auto node_st = hierarchy_.nodeState(key);
+    if (node_st != NodeState::INTERNAL) {
+      return PersistentMapValidationResult{
+          .is_valid = false,
+          .code = PersistentMapValidationCode::COARSENING_STATE_ON_NON_INTERNAL,
+          .error_message = "InternalCoarseningState exists for non-INTERNAL node",
+      };
+    }
+
+    if (state.base_state == CoarseningBaseState::COMPLETE_RETIRED_CACHE) {
+      const auto* ret = payload_store_.findRetiredCache(key);
+      if (ret == nullptr || payload_store_.isRetiredCacheIncomplete(key)) {
+        return PersistentMapValidationResult{
+            .is_valid = false,
+            .code = PersistentMapValidationCode::COARSENING_BASE_RETIRED_CACHE_MISSING,
+            .error_message = "COMPLETE_RETIRED_CACHE requires complete retired cache",
+        };
+      }
+    } else if (state.base_state == CoarseningBaseState::COMPLETE_EMPTY) {
+      if (payload_store_.findRetiredCache(key) != nullptr ||
+          payload_store_.isRetiredCacheIncomplete(key)) {
+        return PersistentMapValidationResult{
+            .is_valid = false,
+            .code = PersistentMapValidationCode::COARSENING_BASE_EMPTY_HAS_RETIRED_CACHE,
+            .error_message = "COMPLETE_EMPTY internal node must not have retired cache or incomplete bit",
+        };
+      }
+    } else if (state.base_state == CoarseningBaseState::INCOMPLETE) {
+      const auto* ret = payload_store_.findRetiredCache(key);
+      if (ret != nullptr && !payload_store_.isRetiredCacheIncomplete(key)) {
+        return PersistentMapValidationResult{
+            .is_valid = false,
+            .code = PersistentMapValidationCode::COARSENING_BASE_RETIRED_CACHE_MISSING,
+            .error_message = "INCOMPLETE node with retired cache must have retired_cache_incomplete flag set",
+        };
+      }
+    }
+
+    if (!state.has_current_shadow) {
+      if (state.current_shadow.hasObservations()) {
+        return PersistentMapValidationResult{
+            .is_valid = false,
+            .code = PersistentMapValidationCode::COARSENING_SHADOW_OBSERVATIONS_INVALID,
+            .error_message = "Non-materialized shadow (!has_current_shadow) contains observations",
+        };
+      }
+    } else {
+      if (!state.current_shadow.hasObservations()) {
+        return PersistentMapValidationResult{
+            .is_valid = false,
+            .code = PersistentMapValidationCode::COARSENING_SHADOW_OBSERVATIONS_INVALID,
+            .error_message = "Materialized shadow has 0 observations",
+        };
+      }
+      if (state.current_shadow.firstSeenFrame() > state.current_shadow.lastSeenFrame()) {
+        return PersistentMapValidationResult{
+            .is_valid = false,
+            .code = PersistentMapValidationCode::COARSENING_SHADOW_FRAME_ORDER_INVALID,
+            .error_message = "Materialized shadow firstSeenFrame > lastSeenFrame",
+        };
+      }
+      if (state.current_shadow.observedFrameCount() < 1) {
+        return PersistentMapValidationResult{
+            .is_valid = false,
+            .code = PersistentMapValidationCode::COARSENING_SHADOW_FRAME_COUNT_INVALID,
+            .error_message = "Materialized shadow observedFrameCount < 1",
+        };
+      }
+      if (state.current_shadow.elevation().count() < state.current_shadow.observedFrameCount()) {
+        return PersistentMapValidationResult{
+            .is_valid = false,
+            .code = PersistentMapValidationCode::COARSENING_SHADOW_POINT_COUNT_INVALID,
+            .error_message = "Materialized shadow elevation.count < observedFrameCount",
+        };
+      }
+      if (state.base_state == CoarseningBaseState::COMPLETE_RETIRED_CACHE) {
+        const auto* ret = payload_store_.findRetiredCache(key);
+        if (ret != nullptr) {
+          if (state.current_shadow.firstSeenFrame() != ret->firstSeenFrame() ||
+              state.current_shadow.lastSeenFrame() < ret->lastSeenFrame() ||
+              state.current_shadow.observedFrameCount() < ret->observedFrameCount() ||
+              state.current_shadow.elevation().count() < ret->elevation().count()) {
+            return PersistentMapValidationResult{
+                .is_valid = false,
+                .code = PersistentMapValidationCode::COARSENING_SHADOW_TEMPORALLY_PRECEDES_BASE,
+                .error_message = "Materialized shadow temporally precedes or contradicts retired base",
+            };
+          }
+        }
+      }
+    }
+  }
+
+  if (internal_coarsening_states_.size() != hierarchy_.internalCount()) {
+    return PersistentMapValidationResult{
+        .is_valid = false,
+        .code = PersistentMapValidationCode::INTERNAL_NODE_MISSING_COARSENING_STATE,
+        .error_message = "internal_coarsening_states_.size() != hierarchy_.internalCount()",
+    };
+  }
+
   return PersistentMapValidationResult{
       .is_valid = true,
       .code = PersistentMapValidationCode::VALID,
@@ -493,10 +741,48 @@ PersistentMapValidationResult PersistentAdaptiveMap::validateInvariants() const 
   };
 }
 
+std::vector<std::pair<avr::spatial::CellKey, InternalCoarseningState>>
+PersistentAdaptiveMap::internalCoarseningSnapshot() const {
+  std::vector<std::pair<avr::spatial::CellKey, InternalCoarseningState>> snapshot;
+  snapshot.reserve(internal_coarsening_states_.size());
+  for (const auto& [k, v] : internal_coarsening_states_) {
+    snapshot.emplace_back(k, v);
+  }
+  std::sort(snapshot.begin(), snapshot.end(), [](const auto& a, const auto& b) {
+    return a.first < b.first;
+  });
+  return snapshot;
+}
+
+InternalCoarseningStats PersistentAdaptiveMap::coarseningStats() const noexcept {
+  InternalCoarseningStats stats{};
+  stats.internal_coarsening_state_count = internal_coarsening_states_.size();
+  stats.map_bucket_count = internal_coarsening_states_.bucket_count();
+  for (const auto& [k, s] : internal_coarsening_states_) {
+    switch (s.base_state) {
+      case CoarseningBaseState::COMPLETE_EMPTY:
+        ++stats.complete_empty_internal_count;
+        break;
+      case CoarseningBaseState::COMPLETE_RETIRED_CACHE:
+        ++stats.complete_retired_internal_count;
+        break;
+      case CoarseningBaseState::INCOMPLETE:
+        ++stats.incomplete_internal_count;
+        break;
+    }
+    if (s.has_current_shadow) {
+      ++stats.materialized_shadow_count;
+      stats.shadow_observation_count += s.current_shadow.observationCount();
+    }
+  }
+  return stats;
+}
+
 PersistentMapStats PersistentAdaptiveMap::statistics() const noexcept {
   return PersistentMapStats{
       .hierarchy_stats = hierarchy_.statistics(),
       .payload_stats = payload_store_.statistics(),
+      .coarsening_stats = coarseningStats(),
       .last_fused_frame_seq = last_fused_frame_seq_,
       .has_fused_frames = has_fused_frames_,
       .total_frames_fused = total_frames_fused_,
@@ -507,6 +793,7 @@ PersistentMapStats PersistentAdaptiveMap::statistics() const noexcept {
 void PersistentAdaptiveMap::reset() noexcept {
   hierarchy_.reset();
   payload_store_.reset();
+  internal_coarsening_states_.clear();
   last_fused_frame_seq_ = 0;
   has_fused_frames_ = false;
   total_frames_fused_ = 0;

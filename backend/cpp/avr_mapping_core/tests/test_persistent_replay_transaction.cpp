@@ -16,6 +16,10 @@ struct PersistentAdaptiveMapTestAccess {
   static AdaptivePayloadStore& payloadStore(PersistentAdaptiveMap& map) noexcept {
     return map.payload_store_;
   }
+  static std::unordered_map<avr::spatial::CellKey, InternalCoarseningState>& internalCoarseningStates(
+      PersistentAdaptiveMap& map) noexcept {
+    return map.internal_coarsening_states_;
+  }
 };
 
 namespace {
@@ -28,6 +32,7 @@ struct MapStateSnapshot {
   std::vector<std::pair<avr::spatial::CellKey, AdaptiveCellPayload>> retired_caches{};
   std::vector<avr::spatial::CellKey> replay_required{};
   std::vector<avr::spatial::CellKey> retired_incomplete{};
+  std::vector<std::pair<avr::spatial::CellKey, InternalCoarseningState>> coarsening_states{};
 
   static MapStateSnapshot capture(const PersistentAdaptiveMap& map) {
     MapStateSnapshot snap;
@@ -38,6 +43,7 @@ struct MapStateSnapshot {
     snap.retired_caches = map.retiredCacheSnapshot();
     snap.replay_required = map.replayRequiredSnapshot();
     snap.retired_incomplete = map.retiredCacheIncompleteSnapshot();
+    snap.coarsening_states = map.internalCoarseningSnapshot();
     return snap;
   }
 
@@ -85,10 +91,11 @@ TEST_F(PersistentReplayTransactionTest, RollbackOnParentIncomplete) {
   const std::vector<PointXYZ> pts = {{0.05, 0.05, 1.0}, {0.25, 0.25, 2.0}};
   cache_opt->pushFrame(pts, 10, avr::spatial::WorldPoint2D{0.0, 0.0});
 
-  // Inject incomplete flag
+  // Inject incomplete flag across payload store and internal coarsening state
   const auto* current_cache = map_.findRetiredCache(root_key_);
   ASSERT_NE(current_cache, nullptr);
   PersistentAdaptiveMapTestAccess::payloadStore(map_).setRetiredCache(root_key_, *current_cache, /*incomplete=*/true);
+  PersistentAdaptiveMapTestAccess::internalCoarseningStates(map_)[root_key_].base_state = CoarseningBaseState::INCOMPLETE;
 
   const auto before = MapStateSnapshot::capture(map_);
   const auto result = map_.replayDirectChildren(root_key_, *cache_opt);

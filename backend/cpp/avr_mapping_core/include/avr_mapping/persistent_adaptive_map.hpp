@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -9,6 +10,7 @@
 #include "avr_mapping/adaptive_hierarchy.hpp"
 #include "avr_mapping/adaptive_payload_store.hpp"
 #include "avr_mapping/frame_evidence.hpp"
+#include "avr_mapping/internal_coarsening_state.hpp"
 #include "avr_mapping/persistent_map_stats.hpp"
 #include "avr_mapping/persistent_merge_result.hpp"
 #include "avr_mapping/recent_observation_cache.hpp"
@@ -215,6 +217,30 @@ class PersistentAdaptiveMap {
   }
 
   /**
+   * @brief Read-only lookup of persistent internal-node coarsening state.
+   *        Returns nullptr if the node is not internal or has no coarsening state.
+   */
+  [[nodiscard]] const InternalCoarseningState* findInternalCoarseningState(
+      avr::spatial::CellKey key) const noexcept {
+    auto it = internal_coarsening_states_.find(key);
+    if (it == internal_coarsening_states_.end()) {
+      return nullptr;
+    }
+    return &it->second;
+  }
+
+  /**
+   * @brief Returns a deterministic, canonically CellKey-sorted snapshot of all internal coarsening states.
+   */
+  [[nodiscard]] std::vector<std::pair<avr::spatial::CellKey, InternalCoarseningState>>
+  internalCoarseningSnapshot() const;
+
+  /**
+   * @brief Returns derived statistics for internal coarsening states.
+   */
+  [[nodiscard]] InternalCoarseningStats coarseningStats() const noexcept;
+
+  /**
    * @brief Clears all hierarchy topology, payload tiles, and sequencing state.
    *        Allocated container and pool block capacities remain reserved for reuse.
    */
@@ -225,6 +251,7 @@ class PersistentAdaptiveMap {
 
   AdaptiveHierarchy hierarchy_;
   AdaptivePayloadStore payload_store_;
+  std::unordered_map<avr::spatial::CellKey, InternalCoarseningState> internal_coarsening_states_;
   uint64_t last_fused_frame_seq_{0};
   bool has_fused_frames_{false};
   uint64_t total_frames_fused_{0};

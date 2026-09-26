@@ -252,7 +252,7 @@ TEST(PersistentMergeTransactionTest, RollbackOnInconsistentPayloadState) {
   snap.verifyIdentical(map);
 }
 
-TEST(PersistentMergeTransactionTest, RollbackOnNoCacheNonEmpty) {
+TEST(PersistentMergeTransactionTest, RollbackOnStrictCacheInsufficient) {
   PersistentAdaptiveMap map{};
   auto cache_opt = RecentObservationCache::create(ReplayCacheConfig{.max_frames = 10});
   ASSERT_TRUE(cache_opt.has_value());
@@ -272,8 +272,10 @@ TEST(PersistentMergeTransactionTest, RollbackOnNoCacheNonEmpty) {
 
   const auto snap = MapStateSnapshot::capture(map);
 
-  // Calling no-cache overload on non-empty children must fail safely with zero mutation
-  const auto res = map.mergeDirectChildren(root_key);
+  // Calling strict cache overload with insufficient cache must fail safely with zero mutation
+  auto empty_cache_opt = RecentObservationCache::create(ReplayCacheConfig{.max_frames = 10});
+  ASSERT_TRUE(empty_cache_opt.has_value());
+  const auto res = map.mergeDirectChildren(root_key, *empty_cache_opt);
   EXPECT_EQ(res.status, MergeStatus::CACHE_HISTORY_INSUFFICIENT);
 
   snap.verifyIdentical(map);
