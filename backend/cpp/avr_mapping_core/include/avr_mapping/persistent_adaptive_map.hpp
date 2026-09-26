@@ -16,6 +16,7 @@
 #include "avr_mapping/recent_observation_cache.hpp"
 #include "avr_mapping/replay_reconstruction_result.hpp"
 #include "avr_mapping/resolution_decision.hpp"
+#include "avr_mapping/subtree_collapse_result.hpp"
 #include "avr_spatial/cell_key.hpp"
 #include "avr_spatial/coordinate.hpp"
 
@@ -148,6 +149,27 @@ class PersistentAdaptiveMap {
   PersistentMergeResult mergeDirectChildren(
       const avr::spatial::CellKey& parent,
       ResolutionReasonBits reasons = {});
+
+  /**
+   * @brief Explicitly collapses an entire descendant subtree back into a complete coarse ancestor.
+   *
+   * Used for gap recovery when safety-driven deep refinement leaves descendants whose fine
+   * historical replay cannot be completed due to raw cache eviction, but whose coarse ancestor
+   * retains a complete exact internal coarsening shadow covering all sensor history.
+   *
+   * Invariants:
+   * - Ancestor must exist, be INTERNAL, and possess a complete coarsening base state.
+   * - Descendants are permitted to have REPLAY_REQUIRED or INCOMPLETE base states.
+   * - Active descendant payloads must be subset-compatible with the canonical ancestor candidate.
+   * - Restores ancestor as a LEAF, installs canonical candidate payload, and erases all descendants.
+   *
+   * @param ancestor CellKey of the internal ancestor node to collapse to.
+   * @param reasons Resolution decision reasons for the collapse transition.
+   * @return SubtreeCollapseResult detailing status and operation metrics.
+   */
+  SubtreeCollapseResult collapseSubtreeFromCompleteShadow(
+      const avr::spatial::CellKey& ancestor,
+      ResolutionReasonBits reasons = ResolutionReasonBits{});
 
   /**
    * @brief Validates all cross-subsystem structural and payload invariants.

@@ -42,6 +42,7 @@ add_executable(avr_mapping_tests
   test_internal_coarsening_shadow.cpp
   test_internal_coarsening_sequences.cpp
   test_internal_coarsening_stress.cpp
+  test_persistent_subtree_collapse.cpp
 )
 
 target_link_libraries(avr_mapping_tests

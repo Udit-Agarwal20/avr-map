@@ -11,6 +11,7 @@ add_library(avr_mapping_core
   src/persistent_replay.cpp
   src/persistent_merge.cpp
   src/resolution_hysteresis.cpp
+  src/persistent_subtree_collapse.cpp
 )
 
 add_library(AVR::mapping_core ALIAS avr_mapping_core)
