@@ -12,6 +12,7 @@ add_library(avr_mapping_core
   src/persistent_merge.cpp
   src/resolution_hysteresis.cpp
   src/persistent_subtree_collapse.cpp
+  src/persistent_adaptive_frame_pipeline.cpp
 )
 
 add_library(AVR::mapping_core ALIAS avr_mapping_core)
