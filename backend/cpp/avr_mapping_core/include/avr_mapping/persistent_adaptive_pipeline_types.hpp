@@ -10,6 +10,7 @@
 #include "avr_mapping/resolution_hysteresis.hpp"
 #include "avr_mapping/resolution_hysteresis_config.hpp"
 #include "avr_mapping/resolution_policy.hpp"
+#include "avr_mapping/semantic_policy_config.hpp"
 #include "avr_mapping/tile_pool.hpp"
 #include "avr_spatial/cell_key.hpp"
 
@@ -78,6 +79,15 @@ enum class AdaptivePipelineStatus : uint8_t {
 
   /// Automatic coarsening or complete-shadow recovery encountered internal corruption or fatal failure.
   COARSENING_INTERNAL_ERROR = 18,
+
+  /// Semantic provider emitted duplicate indices, out-of-bounds indices, invalid enums, or bad confidences.
+  FRAME_REJECTED_SEMANTIC_MALFORMED = 19,
+
+  /// Semantic provider threw an unexpected runtime exception. Non-fatal for map.
+  FRAME_REJECTED_SEMANTIC_ERROR = 20,
+
+  /// Semantic provider or scratch construction failed due to memory allocation failure. Non-fatal for map.
+  FRAME_REJECTED_SEMANTIC_RESOURCE = 21,
 };
 
 [[nodiscard]] constexpr const char* adaptivePipelineStatusToString(
@@ -121,6 +131,12 @@ enum class AdaptivePipelineStatus : uint8_t {
       return "PIPELINE_FATAL_LATCHED";
     case AdaptivePipelineStatus::COARSENING_INTERNAL_ERROR:
       return "COARSENING_INTERNAL_ERROR";
+    case AdaptivePipelineStatus::FRAME_REJECTED_SEMANTIC_MALFORMED:
+      return "FRAME_REJECTED_SEMANTIC_MALFORMED";
+    case AdaptivePipelineStatus::FRAME_REJECTED_SEMANTIC_ERROR:
+      return "FRAME_REJECTED_SEMANTIC_ERROR";
+    case AdaptivePipelineStatus::FRAME_REJECTED_SEMANTIC_RESOURCE:
+      return "FRAME_REJECTED_SEMANTIC_RESOURCE";
   }
   return "UNKNOWN";
 }
@@ -199,6 +215,51 @@ struct PipelineDecisionRecord {
 };
 
 /**
+ * @brief Categorical execution outcome of invoking the external semantic provider.
+ */
+enum class SemanticProviderStatus : uint8_t {
+  NOT_CONFIGURED = 0,
+  OK = 1,
+  UNAVAILABLE = 2,
+  ERROR = 3,
+  RESOURCE_ERROR = 4,
+};
+
+[[nodiscard]] constexpr const char* semanticProviderStatusToString(
+    SemanticProviderStatus status) noexcept {
+  switch (status) {
+    case SemanticProviderStatus::NOT_CONFIGURED:
+      return "NOT_CONFIGURED";
+    case SemanticProviderStatus::OK:
+      return "OK";
+    case SemanticProviderStatus::UNAVAILABLE:
+      return "UNAVAILABLE";
+    case SemanticProviderStatus::ERROR:
+      return "ERROR";
+    case SemanticProviderStatus::RESOURCE_ERROR:
+      return "RESOURCE_ERROR";
+  }
+  return "UNKNOWN";
+}
+
+/**
+ * @brief Per-frame accounting diagnostics for semantic perception and motion filtering.
+ */
+struct SemanticFrameDiagnostics {
+  SemanticProviderStatus provider_status{SemanticProviderStatus::NOT_CONFIGURED};
+  bool provider_configured{false};
+  bool provider_invoked{false};
+  bool provider_degraded{false};
+
+  uint64_t observations_returned{0};
+  uint64_t semantic_observations_used{0};
+  uint64_t confirmed_dynamic_points{0};
+  uint64_t dynamic_excluded_points{0};
+
+  constexpr bool operator==(const SemanticFrameDiagnostics&) const noexcept = default;
+};
+
+/**
  * @brief Detailed accounting and status report returned after processing a single sensor frame.
  */
 struct AdaptivePipelineFrameResult {
@@ -236,6 +297,8 @@ struct AdaptivePipelineFrameResult {
 
   AdaptivePipelineStatus status{AdaptivePipelineStatus::FRAME_REJECTED_INPUT};
 
+  SemanticFrameDiagnostics semantic_diagnostics{};
+
   std::vector<PipelineDecisionRecord> decision_records{};
   std::vector<StructuralActionRecord> structural_action_records{};
 
@@ -253,6 +316,7 @@ struct PersistentAdaptivePipelineConfig {
   ResolutionPolicyConfig policy_config{};
   ResolutionHysteresisConfig hysteresis_config{};
   ReplayCacheConfig replay_cache_config{};
+  SemanticPolicyConfig semantic_config{};
   size_t pool_block_capacity{TilePool::DEFAULT_BLOCK_CAPACITY};
   uint64_t coarsen_group_max_age_generations{2};
 
@@ -260,6 +324,7 @@ struct PersistentAdaptivePipelineConfig {
     return policy_config.validate() &&
            hysteresis_config.isValid() &&
            replay_cache_config.isValid() &&
+           semantic_config.isValid() &&
            pool_block_capacity > 0;
   }
 };

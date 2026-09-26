@@ -679,3 +679,91 @@ This document records architectural and implementation decisions for the **AVR-M
       - `PersistentAdaptiveFramePipeline` continues operating in geometry-only mode using default static routing. Semantic providers, PointNet++, clustering, tracking, and dynamic sinks remain deferred to M10B2+.
 - **Reason**: Guarantees that dynamic point exclusion decisions are preserved immutably across all future multi-resolution map adaptations, resolving the dynamic replay contamination hazard at the root provenance level.
 - **Consequences**: Enables safe integration of upstream dynamic obstacle filters while ensuring existing frozen geometry pipelines, replay reconstruction, and shadow coarsening remain 100% bitwise and behaviorally identical.
+
+---
+
+## ADR-024: Ephemeral Semantic/Dynamic Perception and Replay-Safe Static Fusion
+
+- **Status**: Accepted
+- **Context**:
+  Milestone 10B1 established frozen replay-safe static-fusion routing provenance within `RecentObservationCache` and `PersistentAdaptiveMap::replayDirectChildren`. Milestone 10B2 operationalizes this primitive by integrating a replaceable current-frame semantic perception foundation into `PersistentAdaptiveFramePipeline`.
+  Autonomous vehicle systems require real-time semantic awareness (e.g. distinguishing pedestrians and vehicles from static buildings and road surfaces) and motion awareness (distinguishing moving dynamic objects from parked or static geometry) without compromising the mathematical invariants, deterministic replayability, or memory bounds of the core multi-resolution elevation map.
+- **Decisions**:
+  1. **Semantics Current-Frame Only & Geometry Map Authority**:
+     - Semantic and dynamic evidence exists strictly for the current `processFrame` cycle.
+     - Persistent structures (`AdaptiveCellPayload`, internal coarsening shadows, retired caches, and `LeafPolicyMetadata`) store zero semantic labels, confidences, class histograms, or motion states.
+     - Geometric elevation measurements and spatial quantization remain the absolute spatial authority.
+  2. **Separate Semantic vs Motion Confidence**:
+     - Point-level predictions separate object classification (`SemanticClass`) from motion state (`MotionClassification`).
+     - Each prediction provides an independent confidence value: `semantic_confidence` and `motion_confidence`.
+     - Independent confidence separation prevents high classification certainty (e.g., 99% vehicle) from falsely implying high motion certainty (e.g., parked car with 30% motion certainty).
+  3. **Canonical AVR Semantic Taxonomy**:
+     - Introduced compact, AVR-owned `SemanticClass` enum:
+       `UNKNOWN = 0`, `GROUND = 1`, `ROAD = 2`, `VEGETATION = 3`, `BUILDING = 4`, `VEHICLE = 5`, `PEDESTRIAN = 6`, `OBSTACLE_OTHER = 7`.
+     - No dataset-specific or model-specific IDs (e.g., SemanticKITTI, nuScenes) enter the core mapping engine; mapping occurs exclusively in upstream adapters.
+  4. **Orthogonal Motion Classification**:
+     - Introduced compact `MotionClassification` enum:
+       `UNKNOWN = 0`, `STATIC = 1`, `CANDIDATE = 2`, `CONFIRMED_DYNAMIC = 3`.
+     - Motion classification is completely decoupled from semantic class. Semantic class alone never implies motion state.
+  5. **Sparse Provider Output, PointXYZ Span & Source Index Contract**:
+     - Provider interface is `infer(std::span<const PointXYZ> raw_points, uint64_t frame_seq, avr::spatial::WorldPoint2D sensor_origin)`.
+     - Operates directly over canonical `PointXYZ` raw points without redundant point copies, precision truncation, or Eigen dependencies.
+     - `source_point_index` uses `uint32_t` (matching `CachedObservationFrame::PointIndex`), referencing exact raw point indices.
+     - Frame size > UINT32_MAX is rejected in preflight before provider inference.
+     - Provider output is sparse (`std::vector<SemanticObservation>`); providers need not emit one entry per raw point.
+     - Points not mentioned in provider output default to `SemanticClass::UNKNOWN`, `MotionClassification::UNKNOWN`, zero confidences, and `PointRouting::STATIC_FUSABLE`.
+  6. **Provider Ownership & Backward-Compatible Factory**:
+     - `PersistentAdaptivePipelineConfig` remains a copyable value struct containing `SemanticPolicyConfig`.
+     - `PersistentAdaptiveFramePipeline::create(config)` is preserved unchanged, operating in geometry-only mode.
+     - Added overload `PersistentAdaptiveFramePipeline::create(config, std::unique_ptr<SemanticProvider> provider)`.
+     - The pipeline owns the provider instance uniquely.
+  7. **Provider Optionality & Geometry-Only Equivalence**:
+     - When `provider == nullptr`, the pipeline operates in frozen geometry-only mode with zero semantic overhead.
+     - All routing defaults to `PointRouting::STATIC_FUSABLE`, and all regional semantic/dynamic relevance evaluates to `NONE`.
+     - Produces 100% bitwise and structural equivalence with frozen baseline `93d4eb7`.
+  8. **Provider Unavailable Degradation Fallback**:
+     - If provider returns `std::nullopt`, it is treated as temporary upstream unavailability.
+     - The pipeline sets `provider_degraded = true` and `provider_status = SemanticProviderStatus::UNAVAILABLE` in diagnostics, falls back to geometry-only routing (`PointRouting::STATIC_FUSABLE`), and continues frame processing without error.
+  9. **Pre-Structural Failure Atomicity & Rejection Policy (No Fatal Latch)**:
+     - Provider execution and output validation occur before any persistent topology mutation, root creation, split, replay, or hysteresis mutation.
+     - If provider throws `std::bad_alloc`, frame is rejected with `FRAME_REJECTED_SEMANTIC_RESOURCE`.
+     - If provider throws `std::exception` / unknown error, frame is rejected with `FRAME_REJECTED_SEMANTIC_ERROR`.
+     - If provider emits duplicate indices, out-of-bounds indices, non-finite or out-of-range confidences ($[0, 1]$), invalid enum casts, or mismatched frame sequence, frame is rejected with `FRAME_REJECTED_SEMANTIC_MALFORMED`.
+     - Pre-structural perception failures do NOT latch `fatal_error_latched_ = true`. The persistent map remains uncorrupted and usable for future frames.
+  10. **Full Decision Evidence vs Static-Fusion Evidence Separation**:
+      - `frame_evidence_` (full geometry evidence) contains all valid raw LiDAR returns (both static and dynamic) so that M4 resolution decisions, distance, density, and complexity see full spatial observations. Dynamic obstacles are never hidden from spatial safety refinement.
+      - `static_fusion_evidence_` contains only raw points routed as `PointRouting::STATIC_FUSABLE`. It is used exclusively for `PersistentAdaptiveMap::fuseFrameEvidence`.
+      - When `dynamic_excluded_points == 0`, `frame_evidence_` is fused directly to avoid redundant allocation.
+  11. **Static-Fusion Exclusion Rule & Motion Confidence Gate**:
+      - `motion_confidence < min_motion_confidence` strictly gates motion relevance to `DynamicRelevance::NONE` and routing to `PointRouting::STATIC_FUSABLE`.
+      - If `motion_confidence >= min_motion_confidence`:
+        - `CONFIRMED_DYNAMIC` maps to `DynamicRelevance::CONFIRMED` and `PointRouting::DYNAMIC_EXCLUDED`.
+        - `CANDIDATE` maps to `DynamicRelevance::CANDIDATE` and `PointRouting::STATIC_FUSABLE` (retained in static map to prevent carving false holes on uncertain tracks).
+  12. **Localized SemanticFrameEvidence Representation**:
+      - Implemented `SemanticFrameEvidence` for dyadic regional aggregation across L0-L3 footprints.
+      - Internally stores coarse L3 buckets containing individual `Entry` records with quantized base-grid coordinates (`base_coord`).
+      - Region queries (`evaluateSemanticRelevance`, `evaluateDynamicRelevance`) filter entries by exact dyadic cell key footprint matching (`fromGridCoord(entry.base_coord, region.level) == region`), guaranteeing fine L0, L1, and L2 localization without leaking hazards to sibling cells.
+      - Region semantic relevance evaluates to maximum qualifying relevance: `NONE < ELEVATED < SAFETY_CRITICAL`.
+      - Region dynamic relevance evaluates to maximum qualifying dynamic relevance: `NONE < CANDIDATE < CONFIRMED`.
+      - Ephemeral lifetime: cleared and reset at the beginning of each frame with zero inter-frame persistent state.
+      - Canonical Adapter Policy Mapping (`SemanticClass` -> `SemanticRelevance`):
+        - `PEDESTRIAN`: `SAFETY_CRITICAL` (or `ELEVATED` if `pedestrian_safety_critical` configured false).
+        - `VEHICLE`: `SAFETY_CRITICAL` (or `ELEVATED` if `vehicle_safety_critical` configured false).
+        - `BUILDING`, `VEGETATION`, `OBSTACLE_OTHER`: `ELEVATED`.
+        - `GROUND`, `ROAD`, `UNKNOWN`: `NONE`.
+        - If `semantic_confidence < min_semantic_confidence`: maps to `NONE` regardless of class.
+  13. **M4 Signal Composition, Reason Bits & Density-Gate Exemption**:
+      - Unified helper `makeResolutionSignalsForRegion(region)` queries full `frame_evidence_` together with localized `semantic_frame_evidence_`.
+      - Reuses frozen categorical reason bits: `ResolutionReason::SEMANTIC_RELEVANCE` and `ResolutionReason::DYNAMIC_RELEVANCE`.
+      - Semantic safety-critical caps and confirmed dynamic caps are strictly exempt from the continuous information-density gate, ensuring even sparse single-point hazards can mandate fine sensor-level resolution.
+  14. **Full Raw Cache Retention & Replay Routing Provenance**:
+      - `RecentObservationCache::prepareFrame` receives the full original `raw_points` span of $N$ points and a routing mask of exactly $N$ entries.
+      - Dynamic raw points are never deleted or compacted from cache; they are stored with `PointRouting::DYNAMIC_EXCLUDED`.
+      - Generic cache region queries return all geometrically valid points (both static and dynamic) for tracking and perception history.
+      - Split replay transactions query with static filtering (`PointRouting::STATIC_FUSABLE`), reconstructing only clean static elevation data.
+  15. **Scope Boundaries**:
+      - No deep learning models (PointNet++, TensorRT, CUDA, PyTorch) inside mapping core.
+      - No tracking, Kalman filters, DBSCAN, or cluster IDs (deferred to M10C).
+      - No persistent semantic payload or posteriors in cell payloads or coarsening shadows.
+- **Reason**: Enables safe, real-time localized semantic and dynamic obstacle perception while strictly preserving map integrity, eliminating dynamic ghosting in historical replays, and maintaining 100% geometry-only backward compatibility.
+- **Consequences**: Downstream planners receive fine-resolution topology around confirmed dynamic obstacles and safety-critical classes without corrupting persistent static map elevation cells.

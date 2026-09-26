@@ -14,6 +14,8 @@
 #include "avr_mapping/recent_observation_cache.hpp"
 #include "avr_mapping/resolution_controller.hpp"
 #include "avr_mapping/resolution_hysteresis.hpp"
+#include "avr_mapping/semantic_frame_evidence.hpp"
+#include "avr_mapping/semantic_provider.hpp"
 #include "avr_spatial/cell_key.hpp"
 #include "avr_spatial/coordinate.hpp"
 #include "avr_mapping/point_xyz.hpp"
@@ -50,11 +52,24 @@ class PersistentAdaptiveFramePipeline {
   /**
    * @brief Factory constructor that validates all configuration sub-bundles.
    *
+   * Equivalent to create(config, nullptr).
+   *
    * @param config Pipeline configuration parameters.
    * @return Populated unique_ptr to PersistentAdaptiveFramePipeline, or nullptr if configuration is invalid.
    */
   [[nodiscard]] static std::unique_ptr<PersistentAdaptiveFramePipeline> create(
       const PersistentAdaptivePipelineConfig& config = PersistentAdaptivePipelineConfig{});
+
+  /**
+   * @brief Factory constructor with custom replaceable SemanticProvider.
+   *
+   * @param config Pipeline configuration parameters.
+   * @param provider Unique pointer to custom SemanticProvider (or nullptr for geometry-only).
+   * @return Populated unique_ptr to PersistentAdaptiveFramePipeline, or nullptr if configuration is invalid.
+   */
+  [[nodiscard]] static std::unique_ptr<PersistentAdaptiveFramePipeline> create(
+      const PersistentAdaptivePipelineConfig& config,
+      std::unique_ptr<SemanticProvider> provider);
 
   ~PersistentAdaptiveFramePipeline() = default;
 
@@ -103,6 +118,10 @@ class PersistentAdaptiveFramePipeline {
     return frame_evidence_;
   }
 
+  [[nodiscard]] const SemanticFrameEvidence& semanticFrameEvidence() const noexcept {
+    return semantic_frame_evidence_;
+  }
+
   [[nodiscard]] uint64_t processingGeneration() const noexcept {
     return processing_generation_;
   }
@@ -123,7 +142,9 @@ class PersistentAdaptiveFramePipeline {
       ResolutionHysteresisController hysteresis,
       RecentObservationCache cache,
       size_t pool_block_capacity,
-      uint64_t coarsen_group_max_age_generations);
+      uint64_t coarsen_group_max_age_generations,
+      SemanticPolicyConfig semantic_config,
+      std::unique_ptr<SemanticProvider> provider);
 
   // Helper context for recursive localized refinement
   struct RefinementContext {
@@ -155,6 +176,12 @@ class PersistentAdaptiveFramePipeline {
       RefinementContext& ctx);
 
   /**
+   * @brief Helper combining full geometry FrameEvidence with localized SemanticFrameEvidence.
+   */
+  [[nodiscard]] std::optional<ResolutionSignals> makeResolutionSignalsForRegion(
+      const avr::spatial::CellKey& region) const noexcept;
+
+  /**
    * @brief Expires stale READY metadata where (processing_generation - latest_ready_generation) > W.
    *        Acknowledges hysteresis state with CANCELLED. Returns false if fatal corruption occurs.
    */
@@ -173,6 +200,12 @@ class PersistentAdaptiveFramePipeline {
   uint64_t processing_generation_{0};
   uint64_t coarsen_group_max_age_generations_{2};
   bool fatal_error_latched_{false};
+
+  SemanticPolicyConfig semantic_config_{};
+  std::unique_ptr<SemanticProvider> provider_{nullptr};
+  SemanticFrameEvidence semantic_frame_evidence_{};
+  FrameEvidence static_fusion_evidence_{};
+  std::vector<PointXYZ> static_points_scratch_{};
 
   std::unordered_map<avr::spatial::CellKey, LeafPolicyMetadata> leaf_policy_metadata_{};
 

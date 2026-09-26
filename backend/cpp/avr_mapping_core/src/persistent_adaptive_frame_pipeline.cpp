@@ -70,6 +70,12 @@ bool subtreeHasProvenanceGap(
 
 std::unique_ptr<PersistentAdaptiveFramePipeline> PersistentAdaptiveFramePipeline::create(
     const PersistentAdaptivePipelineConfig& config) {
+  return create(config, nullptr);
+}
+
+std::unique_ptr<PersistentAdaptiveFramePipeline> PersistentAdaptiveFramePipeline::create(
+    const PersistentAdaptivePipelineConfig& config,
+    std::unique_ptr<SemanticProvider> provider) {
   if (!config.isValid()) {
     return nullptr;
   }
@@ -92,7 +98,9 @@ std::unique_ptr<PersistentAdaptiveFramePipeline> PersistentAdaptiveFramePipeline
           std::move(*hysteresis_opt),
           std::move(*cache_opt),
           config.pool_block_capacity,
-          config.coarsen_group_max_age_generations));
+          config.coarsen_group_max_age_generations,
+          config.semantic_config,
+          std::move(provider)));
 }
 
 PersistentAdaptiveFramePipeline::PersistentAdaptiveFramePipeline(
@@ -100,12 +108,25 @@ PersistentAdaptiveFramePipeline::PersistentAdaptiveFramePipeline(
     ResolutionHysteresisController hysteresis,
     RecentObservationCache cache,
     size_t pool_block_capacity,
-    uint64_t coarsen_group_max_age_generations)
+    uint64_t coarsen_group_max_age_generations,
+    SemanticPolicyConfig semantic_config,
+    std::unique_ptr<SemanticProvider> provider)
     : resolution_controller_(std::move(controller)),
       hysteresis_(std::move(hysteresis)),
       persistent_map_(pool_block_capacity),
       replay_cache_(std::move(cache)),
-      coarsen_group_max_age_generations_(coarsen_group_max_age_generations) {}
+      coarsen_group_max_age_generations_(coarsen_group_max_age_generations),
+      semantic_config_(semantic_config),
+      provider_(std::move(provider)) {}
+
+std::optional<ResolutionSignals> PersistentAdaptiveFramePipeline::makeResolutionSignalsForRegion(
+    const avr::spatial::CellKey& region) const noexcept {
+  return frame_evidence_.makeResolutionSignals(
+      region,
+      semantic_frame_evidence_.evaluateSemanticRelevance(region),
+      semantic_frame_evidence_.evaluateDynamicRelevance(region),
+      std::nullopt);
+}
 
 AdaptivePipelineFrameResult PersistentAdaptiveFramePipeline::processFrame(
     std::span<const PointXYZ> raw_points,
@@ -144,6 +165,7 @@ AdaptivePipelineFrameResult PersistentAdaptiveFramePipeline::processFrame(
   }
 
   // 5. Phase 1: Build frame evidence
+  semantic_frame_evidence_.reset();
   auto ev_stats_opt = frame_evidence_.buildFrame(raw_points, frame_seq, sensor_origin);
   if (!ev_stats_opt.has_value()) {
     result.status = AdaptivePipelineStatus::FRAME_REJECTED_INPUT;
@@ -151,8 +173,141 @@ AdaptivePipelineFrameResult PersistentAdaptiveFramePipeline::processFrame(
   }
   result.accepted_points = ev_stats_opt->accepted_points;
 
+  // Semantic provider execution and validation
+  result.semantic_diagnostics.provider_configured = (provider_ != nullptr);
+  std::vector<PointRouting> routing(raw_points.size(), PointRouting::STATIC_FUSABLE);
+
+  if (provider_ != nullptr) {
+    if (!raw_points.empty()) {
+      result.semantic_diagnostics.provider_invoked = true;
+      std::optional<SemanticFrameResult> provider_result = std::nullopt;
+      try {
+        provider_result = provider_->infer(raw_points, frame_seq, sensor_origin);
+      } catch (const std::bad_alloc&) {
+        result.semantic_diagnostics.provider_status = SemanticProviderStatus::RESOURCE_ERROR;
+        result.status = AdaptivePipelineStatus::FRAME_REJECTED_SEMANTIC_RESOURCE;
+        return result;
+      } catch (const std::exception&) {
+        result.semantic_diagnostics.provider_status = SemanticProviderStatus::ERROR;
+        result.status = AdaptivePipelineStatus::FRAME_REJECTED_SEMANTIC_ERROR;
+        return result;
+      } catch (...) {
+        result.semantic_diagnostics.provider_status = SemanticProviderStatus::ERROR;
+        result.status = AdaptivePipelineStatus::FRAME_REJECTED_SEMANTIC_ERROR;
+        return result;
+      }
+
+      if (!provider_result.has_value()) {
+        result.semantic_diagnostics.provider_degraded = true;
+        result.semantic_diagnostics.provider_status = SemanticProviderStatus::UNAVAILABLE;
+      } else {
+        result.semantic_diagnostics.provider_status = SemanticProviderStatus::OK;
+        if (provider_result->frame_seq != frame_seq) {
+          result.status = AdaptivePipelineStatus::FRAME_REJECTED_SEMANTIC_MALFORMED;
+          return result;
+        }
+
+        result.semantic_diagnostics.observations_returned =
+            static_cast<uint32_t>(provider_result->observations.size());
+
+        try {
+          std::vector<bool> seen_indices(raw_points.size(), false);
+          for (const auto& obs : provider_result->observations) {
+            if (obs.source_point_index >= raw_points.size()) {
+              result.status = AdaptivePipelineStatus::FRAME_REJECTED_SEMANTIC_MALFORMED;
+              return result;
+            }
+            if (seen_indices[obs.source_point_index]) {
+              result.status = AdaptivePipelineStatus::FRAME_REJECTED_SEMANTIC_MALFORMED;
+              return result;
+            }
+            seen_indices[obs.source_point_index] = true;
+
+            if (!std::isfinite(obs.semantic_confidence) ||
+                obs.semantic_confidence < 0.0f || obs.semantic_confidence > 1.0f) {
+              result.status = AdaptivePipelineStatus::FRAME_REJECTED_SEMANTIC_MALFORMED;
+              return result;
+            }
+            if (!std::isfinite(obs.motion_confidence) ||
+                obs.motion_confidence < 0.0f || obs.motion_confidence > 1.0f) {
+              result.status = AdaptivePipelineStatus::FRAME_REJECTED_SEMANTIC_MALFORMED;
+              return result;
+            }
+
+            if (!isValidSemanticClass(obs.semantic_class) ||
+                !isValidMotionClassification(obs.motion_state)) {
+              result.status = AdaptivePipelineStatus::FRAME_REJECTED_SEMANTIC_MALFORMED;
+              return result;
+            }
+          }
+
+          for (const auto& obs : provider_result->observations) {
+            if (obs.motion_state == MotionClassification::CONFIRMED_DYNAMIC &&
+                obs.motion_confidence >= semantic_config_.min_motion_confidence) {
+              routing[obs.source_point_index] = PointRouting::DYNAMIC_EXCLUDED;
+              ++result.semantic_diagnostics.confirmed_dynamic_points;
+              ++result.semantic_diagnostics.dynamic_excluded_points;
+            }
+
+            const auto& pt = raw_points[obs.source_point_index];
+            if (pt.isFinite()) {
+              auto gx = avr::spatial::quantizeToBaseGridSafe(pt.x);
+              auto gy = avr::spatial::quantizeToBaseGridSafe(pt.y);
+              if (gx.has_value() && gy.has_value()) {
+                semantic_frame_evidence_.addObservation(
+                    obs.source_point_index,
+                    avr::spatial::GridCoord2D{.x = *gx, .y = *gy},
+                    obs.semantic_class,
+                    obs.semantic_confidence,
+                    obs.motion_state,
+                    obs.motion_confidence,
+                    semantic_config_);
+                ++result.semantic_diagnostics.semantic_observations_used;
+              }
+            }
+          }
+        } catch (const std::bad_alloc&) {
+          result.status = AdaptivePipelineStatus::FRAME_REJECTED_SEMANTIC_RESOURCE;
+          return result;
+        }
+      }
+    }
+  }
+
+  if (result.semantic_diagnostics.dynamic_excluded_points > 0) {
+    try {
+      static_points_scratch_.clear();
+      static_points_scratch_.reserve(raw_points.size() - result.semantic_diagnostics.dynamic_excluded_points);
+      for (size_t i = 0; i < raw_points.size(); ++i) {
+        if (routing[i] == PointRouting::STATIC_FUSABLE) {
+          static_points_scratch_.push_back(raw_points[i]);
+        }
+      }
+      auto static_build_opt = static_fusion_evidence_.buildFrame(
+          static_points_scratch_, frame_seq, sensor_origin);
+      if (!static_build_opt.has_value()) {
+        result.status = AdaptivePipelineStatus::FRAME_REJECTED_INPUT;
+        return result;
+      }
+    } catch (const std::bad_alloc&) {
+      result.status = AdaptivePipelineStatus::FRAME_REJECTED_SEMANTIC_RESOURCE;
+      return result;
+    }
+  }
+
+  const FrameEvidence& fusion_evidence =
+      (result.semantic_diagnostics.dynamic_excluded_points > 0)
+          ? static_fusion_evidence_
+          : frame_evidence_;
+
   // 6. Phase 1: Stage raw cache
-  auto prep_frame_opt = replay_cache_.prepareFrame(raw_points, frame_seq, sensor_origin);
+  std::optional<PreparedCachedObservationFrame> prep_frame_opt;
+  if (result.semantic_diagnostics.provider_configured &&
+      !result.semantic_diagnostics.provider_degraded) {
+    prep_frame_opt = replay_cache_.prepareFrame(raw_points, routing, frame_seq, sensor_origin);
+  } else {
+    prep_frame_opt = replay_cache_.prepareFrame(raw_points, frame_seq, sensor_origin);
+  }
   if (!prep_frame_opt.has_value()) {
     result.status = AdaptivePipelineStatus::FRAME_REJECTED_INPUT;
     return result;
@@ -161,7 +316,7 @@ AdaptivePipelineFrameResult PersistentAdaptiveFramePipeline::processFrame(
 
   // If no accepted observations, frame is valid empty.
   if (ev_stats_opt->active_base_cells == 0) {
-    auto fusion_opt = persistent_map_.fuseFrameEvidence(frame_evidence_);
+    auto fusion_opt = persistent_map_.fuseFrameEvidence(fusion_evidence);
     if (!fusion_opt.has_value()) {
       result.status = AdaptivePipelineStatus::FUSION_FAILED;
       auto map_val = persistent_map_.validateInvariants();
@@ -263,8 +418,7 @@ AdaptivePipelineFrameResult PersistentAdaptiveFramePipeline::processFrame(
 
   for (const auto& leaf : pre_existing_touched_leaves) {
     ++result.regions_evaluated;
-    auto signals_opt = frame_evidence_.makeResolutionSignals(
-        leaf, SemanticRelevance::NONE, DynamicRelevance::NONE, std::nullopt);
+    auto signals_opt = makeResolutionSignalsForRegion(leaf);
     if (!signals_opt.has_value()) {
       result.status = AdaptivePipelineStatus::FRAME_REJECTED_DECISION;
       return result;
@@ -310,8 +464,7 @@ AdaptivePipelineFrameResult PersistentAdaptiveFramePipeline::processFrame(
 
   for (const auto& root_key : prospective_l3_roots) {
     ++result.regions_evaluated;
-    auto signals_opt = frame_evidence_.makeResolutionSignals(
-        root_key, SemanticRelevance::NONE, DynamicRelevance::NONE, std::nullopt);
+    auto signals_opt = makeResolutionSignalsForRegion(root_key);
     if (!signals_opt.has_value()) {
       result.status = AdaptivePipelineStatus::FRAME_REJECTED_DECISION;
       return result;
@@ -420,7 +573,7 @@ AdaptivePipelineFrameResult PersistentAdaptiveFramePipeline::processFrame(
   bool simulate_fusion_fail = test_simulate_fusion_failure_;
   std::optional<PersistentFusionStats> fusion_opt = std::nullopt;
   if (!simulate_fusion_fail) {
-    fusion_opt = persistent_map_.fuseFrameEvidence(frame_evidence_);
+    fusion_opt = persistent_map_.fuseFrameEvidence(fusion_evidence);
   }
 
   if (!fusion_opt.has_value()) {
@@ -1070,8 +1223,7 @@ bool PersistentAdaptiveFramePipeline::refineRegionFromEvidence(
     }
 
     ++ctx.result.regions_evaluated;
-    auto signals_opt = frame_evidence_.makeResolutionSignals(
-        child, SemanticRelevance::NONE, DynamicRelevance::NONE, std::nullopt);
+    auto signals_opt = makeResolutionSignalsForRegion(child);
     if (!signals_opt.has_value()) {
       return false;
     }
