@@ -35,6 +35,9 @@ add_executable(avr_mapping_tests
   test_persistent_merge.cpp
   test_persistent_merge_transaction.cpp
   test_persistent_merge_stress.cpp
+  test_resolution_hysteresis.cpp
+  test_resolution_hysteresis_sequences.cpp
+  test_resolution_hysteresis_stress.cpp
 )
 
 target_link_libraries(avr_mapping_tests

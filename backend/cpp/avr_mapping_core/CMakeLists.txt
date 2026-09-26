@@ -10,6 +10,7 @@ add_library(avr_mapping_core
   src/recent_observation_cache.cpp
   src/persistent_replay.cpp
   src/persistent_merge.cpp
+  src/resolution_hysteresis.cpp
 )
 
 add_library(AVR::mapping_core ALIAS avr_mapping_core)
