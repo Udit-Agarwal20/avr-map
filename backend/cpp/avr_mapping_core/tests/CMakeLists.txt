@@ -32,6 +32,9 @@ add_executable(avr_mapping_tests
   test_persistent_replay_completeness.cpp
   test_persistent_replay_transaction.cpp
   test_persistent_replay_stress.cpp
+  test_persistent_merge.cpp
+  test_persistent_merge_transaction.cpp
+  test_persistent_merge_stress.cpp
 )
 
 target_link_libraries(avr_mapping_tests

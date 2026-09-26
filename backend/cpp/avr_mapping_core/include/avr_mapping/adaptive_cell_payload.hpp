@@ -69,6 +69,10 @@ class AdaptiveCellPayload {
     return last_update_reasons_;
   }
 
+  void setLastUpdateReasons(ResolutionReasonBits reasons) noexcept {
+    last_update_reasons_ = reasons;
+  }
+
   [[nodiscard]] bool hasObservations() const noexcept {
     return elevation_.count() > 0;
   }

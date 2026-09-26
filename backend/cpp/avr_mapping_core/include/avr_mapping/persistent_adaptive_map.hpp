@@ -10,6 +10,7 @@
 #include "avr_mapping/adaptive_payload_store.hpp"
 #include "avr_mapping/frame_evidence.hpp"
 #include "avr_mapping/persistent_map_stats.hpp"
+#include "avr_mapping/persistent_merge_result.hpp"
 #include "avr_mapping/recent_observation_cache.hpp"
 #include "avr_mapping/replay_reconstruction_result.hpp"
 #include "avr_mapping/resolution_decision.hpp"
@@ -120,6 +121,33 @@ class PersistentAdaptiveMap {
       const RecentObservationCache& cache);
 
   /**
+   * @brief Coordinated manual persistent coarsening of four direct leaf siblings into parent.
+   *
+   * Validates that parent is INTERNAL and all 4 direct children are LEAF with complete replay.
+   * If children have observations, reconstructs and verifies exact child states from raw cache,
+   * reconstructs parent state without child frame double counting, clears children, removes
+   * old parent retired cache, and installs merged active payload on the newly coarsened parent.
+   * If all children are empty, coarsens without requiring cache observations.
+   *
+   * @param parent CellKey of the internal parent node to coarsen.
+   * @param cache Bounded recent raw observation cache (accessed read-only).
+   * @param reasons Resolution decision reason bits for this coarsening event.
+   * @return PersistentMergeResult detailing status and operation metrics.
+   */
+  PersistentMergeResult mergeDirectChildren(
+      const avr::spatial::CellKey& parent,
+      const RecentObservationCache& cache,
+      ResolutionReasonBits reasons = {});
+
+  /**
+   * @brief Coordinated manual persistent coarsening for children with no active payload.
+   *        Rejects with CACHE_HISTORY_INSUFFICIENT if any child has active observations.
+   */
+  PersistentMergeResult mergeDirectChildren(
+      const avr::spatial::CellKey& parent,
+      ResolutionReasonBits reasons = {});
+
+  /**
    * @brief Validates all cross-subsystem structural and payload invariants.
    */
   [[nodiscard]] PersistentMapValidationResult validateInvariants() const;
@@ -201,6 +229,11 @@ class PersistentAdaptiveMap {
   bool has_fused_frames_{false};
   uint64_t total_frames_fused_{0};
   uint64_t total_observations_fused_{0};
+
+  PersistentMergeResult mergeDirectChildrenImpl(
+      const avr::spatial::CellKey& parent,
+      const RecentObservationCache* cache,
+      ResolutionReasonBits reasons);
 };
 
 }  // namespace avr::mapping
