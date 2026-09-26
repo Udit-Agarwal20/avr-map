@@ -81,6 +81,7 @@ struct ReplayCacheFrameStats {
 struct ReplayCacheStats {
   size_t max_frames{0};
   size_t stored_frames{0};
+  uint64_t total_frames_pushed{0};
   uint64_t stored_raw_points{0};
   uint64_t stored_replay_candidates{0};
   size_t stored_bucket_count{0};

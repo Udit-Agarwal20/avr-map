@@ -15,32 +15,63 @@ std::optional<RecentObservationCache> RecentObservationCache::create(
 RecentObservationCache::RecentObservationCache(ReplayCacheConfig config) noexcept
     : config_(config) {}
 
-std::optional<ReplayCacheFrameStats> RecentObservationCache::pushFrame(
+std::optional<PreparedCachedObservationFrame> RecentObservationCache::prepareFrame(
     std::span<const PointXYZ> raw_points,
     uint64_t frame_seq,
-    avr::spatial::WorldPoint2D sensor_origin) {
-  // 1. Frame order check: strictly increasing frame_seq
+    avr::spatial::WorldPoint2D sensor_origin) const {
+  // 1. Frame order check: strictly increasing frame_seq relative to current newest frame
   if (!frames_.empty() && frame_seq <= frames_.back().frameSeq()) {
     return std::nullopt;
   }
 
-  // 2. Prepare candidate frame in temporary object
+  // 2. Prepare candidate frame in self-contained object
   auto frame_opt = CachedObservationFrame::create(raw_points, frame_seq, sensor_origin);
   if (!frame_opt.has_value()) {
     // Non-finite sensor origin or point count > UINT32_MAX
     return std::nullopt;
   }
 
-  // 3. Commit phase: push new frame
-  const auto stats = frame_opt->statistics();
-  frames_.push_back(std::move(*frame_opt));
+  return PreparedCachedObservationFrame(std::move(*frame_opt));
+}
+
+std::optional<ReplayCacheFrameStats> RecentObservationCache::commitPreparedFrame(
+    PreparedCachedObservationFrame&& prepared) {
+  // 1. Validate prepared state
+  if (!prepared.isValid()) {
+    return std::nullopt;
+  }
+
+  // 2. Validate frame order against CURRENT cache state at commit time
+  if (!frames_.empty() && prepared.frameSeq() <= frames_.back().frameSeq()) {
+    return std::nullopt;
+  }
+
+  // 3. Extract stats and move frame into internal storage
+  const auto stats = prepared.statistics();
+  auto frame = std::move(prepared).extractFrame();
+
+  frames_.push_back(std::move(frame));
 
   // 4. Eviction: evict oldest frame(s) until size <= max_frames
   while (frames_.size() > config_.max_frames) {
     frames_.pop_front();
   }
 
+  // 5. Advance lifetime counter
+  ++total_frames_pushed_;
+
   return stats;
+}
+
+std::optional<ReplayCacheFrameStats> RecentObservationCache::pushFrame(
+    std::span<const PointXYZ> raw_points,
+    uint64_t frame_seq,
+    avr::spatial::WorldPoint2D sensor_origin) {
+  auto prepared = prepareFrame(raw_points, frame_seq, sensor_origin);
+  if (!prepared.has_value()) {
+    return std::nullopt;
+  }
+  return commitPreparedFrame(std::move(*prepared));
 }
 
 const CachedObservationFrame* RecentObservationCache::findFrame(uint64_t frame_seq) const noexcept {
@@ -103,6 +134,7 @@ ReplayCacheStats RecentObservationCache::statistics() const noexcept {
   ReplayCacheStats stats{};
   stats.max_frames = config_.max_frames;
   stats.stored_frames = frames_.size();
+  stats.total_frames_pushed = total_frames_pushed_;
   if (!frames_.empty()) {
     stats.oldest_frame_seq = frames_.front().frameSeq();
     stats.newest_frame_seq = frames_.back().frameSeq();
@@ -121,6 +153,7 @@ ReplayCacheStats RecentObservationCache::statistics() const noexcept {
 
 void RecentObservationCache::reset() noexcept {
   frames_.clear();
+  total_frames_pushed_ = 0;
 }
 
 }  // namespace avr::mapping

@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "avr_mapping/cached_observation_frame.hpp"
+#include "avr_mapping/prepared_cached_observation_frame.hpp"
 #include "avr_mapping/replay_cache_stats.hpp"
 
 namespace avr::mapping {
@@ -52,6 +53,43 @@ class RecentObservationCache {
    * @param sensor_origin Sensor position in world coordinates (must be finite).
    * @return ReplayCacheFrameStats on successful commit, std::nullopt on any validation failure.
    */
+  /**
+   * @brief Staged preparation phase: validates and constructs candidate frame in external staging state.
+   *
+   * Invariants:
+   * - Strictly side-effect-free: performs zero mutations to RecentObservationCache.
+   * - Does NOT evict oldest retained frames, change frame count, or advance statistics.
+   * - Does NOT invalidate any borrowed pointers previously returned by findFrame().
+   * - Finite sensor-origin validation is frame-fatal; individual non-finite raw points are retained but unindexed.
+   * - Validates point limits (<= UINT32_MAX) and partitions points via CachedObservationFrame::create.
+   * - Validates frame_seq > newest retained frame if cache is non-empty.
+   *
+   * @param raw_points Raw sensor input points.
+   * @param frame_seq Global sequence number (must be > newestFrameSeq if cache is non-empty).
+   * @param sensor_origin Sensor position in world coordinates (must be finite).
+   * @return PreparedCachedObservationFrame on success, std::nullopt on any validation failure.
+   */
+  [[nodiscard]] std::optional<PreparedCachedObservationFrame> prepareFrame(
+      std::span<const PointXYZ> raw_points,
+      uint64_t frame_seq,
+      avr::spatial::WorldPoint2D sensor_origin) const;
+
+  /**
+   * @brief Staged commit phase: atomically commits a previously prepared candidate frame into cache.
+   *
+   * Commit Semantics:
+   * - Validates prepared.isValid() (rejects moved-from or default-constructed frames).
+   * - Validates prepared.frameSeq() > newest retained frame against CURRENT cache state.
+   * - Moves prepared frame into internal storage.
+   * - Performs FIFO eviction if retained frame count exceeds max_frames.
+   * - Advances cumulative lifetime statistics (total_frames_pushed).
+   *
+   * @param prepared Move-reference to a valid PreparedCachedObservationFrame.
+   * @return ReplayCacheFrameStats on successful commit, std::nullopt on any validation failure.
+   */
+  std::optional<ReplayCacheFrameStats> commitPreparedFrame(
+      PreparedCachedObservationFrame&& prepared);
+
   std::optional<ReplayCacheFrameStats> pushFrame(
       std::span<const PointXYZ> raw_points,
       uint64_t frame_seq,
@@ -115,6 +153,10 @@ class RecentObservationCache {
     return config_;
   }
 
+  [[nodiscard]] uint64_t totalFramesPushed() const noexcept {
+    return total_frames_pushed_;
+  }
+
   void reset() noexcept;
 
  private:
@@ -122,6 +164,7 @@ class RecentObservationCache {
 
   ReplayCacheConfig config_{};
   std::deque<CachedObservationFrame> frames_{};
+  uint64_t total_frames_pushed_{0};
 };
 
 }  // namespace avr::mapping
