@@ -437,3 +437,79 @@ This document records architectural and implementation decisions for the **AVR-M
   20. **Raw Cache Independence and Deferred Policy**: The recovery primitive has zero dependency on `RecentObservationCache` and operates cleanly even after old raw history is completely evicted. Automatic pipeline triggering, automatic adaptation, and cascaded coarsening policies are strictly deferred.
 - **Reason**: Provides an architecturally sound and scientifically honest mechanism to resolve stranded deep refinement replay gaps by collapsing incomplete descendant subtrees back into complete coarse ancestors whose shadows have continuously tracked full observation history.
 - **Consequences**: Autonomous systems can recover from unreplayable deep refinement branches safely and deterministically without unbounded raw frame retention, restoring full invariant compliance and unblocking subsequent refinement cycles.
+
+---
+
+## ADR-020: Staged Hysteresis Observation Preview and Commit
+
+- **Status**: Accepted (Transaction-isolated staged observation processing for `ResolutionHysteresisController`)
+- **Context**: In Milestone 9B1, `ResolutionHysteresisController::observe` combined transition evaluation, candidate installation, streak advancement, and pending action generation into a single immediate mutating call. The Milestone 9B3D coordinator architecture audit identified a fundamental transaction-isolation problem: an autonomous adaptation coordinator must evaluate temporal resolution hysteresis decisions BEFORE executing structural hierarchy refinement and raw sensor point fusion, but the candidate temporal observation state must persist ONLY AFTER the incoming sensor frame successfully fuses into `PersistentAdaptiveMap`. If frame fusion later fails (e.g. numerical failure, invalid sensor data), an immediately mutated hysteresis state would cause irreversible policy drift. Furthermore, unconditional candidate overwrite upon delayed commit would allow stale candidates to overwrite newer state mutations (such as intervening acknowledgements, erasures, or clears). Milestone 9B3E resolves this transaction boundary by introducing non-mutating preview and staged commit with stale-precondition validation.
+- **Decision**:
+  1. **Immediate Mutation Incompatible with Staged Pipelines**: Immediate mutation in `observe(...)` violates the transaction isolation required by multi-phase mapping pipelines. Staged preview and explicit commit decouple decision inspection from persistent policy state advancement.
+  2. **Non-Mutating Pure Preview (`previewObservation`)**: `ResolutionHysteresisController::previewObservation(...)` is a `const` member function. It performs zero mutations on controller state: zero insertions into `regions_`, zero erasures, zero streak updates, zero acknowledgement mutations, and zero revision advances.
+  3. **Value-Owned Self-Contained Staged Object (`HysteresisPreparedObservation`)**: Preview returns a value-owned struct containing the evaluated `HysteresisResult`, the expected controller revision token, expected prior presence and state, candidate presence, and candidate `RegionHysteresisState`. It retains zero references or pointers into controller storage, requires zero dynamic heap allocation, and has trivial copy/move semantics (`std::is_trivially_copyable_v<HysteresisPreparedObservation> == true`, `sizeof = 128`, `alignof = 8`).
+  4. **Single Internal Transition Evaluator**: The core state-transition logic of Milestone 9B1 is unified into a single pure evaluator function (`evaluateTransition`) shared between `previewObservation` and `observe`. There is exactly ONE copy of frame ordering logic, finer/equal/coarser branching, stable streak counting, pending threshold gating, and reason-bit policies. Legacy `observe` delegates directly to `previewObservation` followed by `commitPreparedObservation`, ensuring identical algorithmic behavior and zero code fork.
+  5. **Global Controller Revision Token (`state_revision_`)**: A 64-bit monotonically advancing revision token tracks controller mutations. `state_revision_` is a GLOBAL transaction token. Consequently, ANY successful controller mutation invalidates EVERY staged observation prepared under an earlier revision, including mutations to completely unrelated CellKeys. This intentionally conservative behavior prevents hidden concurrent policy desynchronization.
+  6. **Clear as a Deliberate Revision Barrier**: When `state_revision_ < UINT64_MAX`, `clear()` removes all tracked region states, preserves configuration, and ALWAYS increments `state_revision_` by exactly 1, even if `regions_` was already empty. This deliberate revision barrier invalidates all staged observations across the entire controller.
+  7. **Revision Exhaustion Terminal Contract**: When `state_revision_ == UINT64_MAX`, the controller is terminally mutation-frozen. No further logical controller mutation may occur:
+     - `commitPreparedObservation` returns `PreparedCommitStatus::REVISION_EXHAUSTED` with zero mutation;
+     - `commitPreparedBatch` returns `PreparedBatchCommitStatus::REVISION_EXHAUSTED` with zero mutation;
+     - legacy `observe` returns `HysteresisAction::INVALID_OBSERVATION` with zero mutation;
+     - `acknowledgeCoarsenResult` returns `false` with zero mutation;
+     - `eraseRegion` returns `false` with zero mutation;
+     - `clear()` returns immediately with zero mutation (leaving tracked `regions_` intact and revision at `UINT64_MAX`).
+     Under no circumstances does `state_revision_` ever wrap from `UINT64_MAX` to 0.
+  8. **Preview at Revision Exhaustion**: `previewObservation` remains a read-only inspectable query even at `state_revision_ == UINT64_MAX`, returning a valid candidate transition with `expected_controller_revision = UINT64_MAX`. However, because there is no revision headroom to advance, attempting to commit this candidate returns `REVISION_EXHAUSTED`.
+  9. **Successful Single-Commit Ordering**: Single commit executes ordinary validation BEFORE mutation:
+     - Candidate is committable and valid;
+     - `prepared.expected_controller_revision == state_revision_`;
+     - Expected prior presence matches current container presence;
+     - Expected prior state matches current container state under semantic field equality (no raw `memcmp`);
+     - Candidate invariants hold (`has_last_frame == true`, `last_frame_seq == prepared.frame_seq`, streak $\le$ threshold, pending target consistency);
+     - Revision headroom exists (`state_revision_ < UINT64_MAX`).
+     Only after all checks pass is the candidate installed in `regions_`, followed by advancing `state_revision_` by exactly 1.
+  10. **Absent Region Insertion OOM Contract**: For an absent region commit, `unordered_map` insertion may allocate memory. If allocation throws `std::bad_alloc`, the revision has not yet advanced, and existing controller state remains valid per standard container exception guarantees.
+  11. **Batch Commit API (`commitPreparedBatch`)**: For applying multiple regional transitions resulting from a single fused frame, `commitPreparedBatch(std::span<const HysteresisPreparedObservation>)` executes a single atomic policy transaction.
+  12. **Batch Prevalidation and All-or-None Guarantee**: Before any state modification, the entire batch is strictly prevalidated:
+     - Every entry must have `expected_controller_revision == state_revision_`;
+     - Every entry must be committable and valid;
+     - All entries must have distinct `CellKey` identifiers (`DUPLICATE_REGION` rejection if duplicate keys exist);
+     - Every entry's prior-state presence and semantic field equality must match current storage;
+     - Revision headroom must exist.
+     If ANY entry fails validation, the entire batch is rejected with `committed_count = 0` and zero controller state is modified.
+  13. **Batch Canonical Ordering and Single Revision Advance**: On prevalidation success, batch candidates are installed in canonical Morton `CellKey` order. `state_revision_` increments exactly ONCE for the entire non-empty batch.
+  14. **Batch Subset Use Case**: In future pipeline execution, a frame may preview regions $\{A, B, C, D\}$. If spatial refinement splits $B$ and $D$ into internal nodes before fusion, only surviving active leaves $\{A, C\}$ are submitted to `commitPreparedBatch({A, C})`. Because all surviving prepared observations share the original revision $R$ and no intermediate hysteresis mutations occurred, the subset batch commits cleanly against revision $R$.
+  15. **Batch vs Sequential Revision Semantics**: $N$ sequential legacy `observe` calls advance `state_revision_` $N$ times. One staged batch containing $N$ region transitions advances `state_revision_` ONCE. This difference is intentional: a batch represents a single atomic policy transaction for a fused frame. The per-region semantic states resulting from both methods are identical.
+  16. **Empty Batch Contract**: An empty batch (`commitPreparedBatch({})`) is a successful no-op (`APPLIED`, `committed_count = 0`) that leaves `state_revision_` and container state completely unchanged.
+  17. **Batch Out-of-Memory (OOM) Contract and Future Pipeline Consequence**: New region insertions in a batch allocate hashtable nodes. While all logical conditions are prevalidated, `std::bad_alloc` during multi-entry insertion may occur after an earlier candidate has been inserted. Therefore, batch atomicity is NOT guaranteed under OOM. If `std::bad_alloc` is caught during staged hysteresis batch installation, the future pipeline coordinator must treat controller state as potentially partially applied and enter a fatal internal policy-error path; it must NOT silently continue normal adaptive operation.
+  18. **Zero Side-Effects on Discard**: A prepared observation or batch can be discarded without calling commit or cancel. Uncommitted candidates have zero side effects on controller state, read-only lookups, snapshots, or acknowledgement eligibility.
+  19. **Acknowledgement and Erase Contracts Unchanged**: `acknowledgeCoarsenResult` and `eraseRegion` preserve their frozen Milestone 9B1 semantics:
+     - `APPLIED` erases the region state and increments `state_revision_` by 1;
+     - `BLOCKED_HOLD_FINE` and `CANCELLED` clear the pending flag, reset stable coarsen count to 0, preserve frame ordering history (`has_last_frame`, `last_frame_seq`), and increment `state_revision_` by 1;
+     - Unsuccessful acks/erases leave `state_revision_` unchanged;
+     - At revision exhaustion, all acks and erases fail closed with zero mutation.
+  20. **Critical Future Success-Path Ordering**: Because `state_revision_` is a global transaction token, any mutation invalidates the staged batch. In the future adaptive pipeline, after sensor frame fusion succeeds:
+     - **FIRST**: Commit the surviving `HysteresisPreparedObservation` batch against revision $R$ $\rightarrow$ advances controller to $R+1$;
+     - **ONLY AFTER THAT**: Call `eraseRegion` on hysteresis states belonging to former leaves that became `INTERNAL` during structural refinement;
+     - **THEN**: Post-fusion coarsening acknowledgements, cancellations, or ordinary merge cleanups may mutate the controller.
+     DO NOT call `eraseRegion` or `acknowledgeCoarsenResult` BEFORE staged batch commit, because any prior mutation advances `state_revision_` and causes the batch commit to fail with `STALE_CONTROLLER_REVISION`.
+  21. **Future Success-Path Ordering Example**:
+     - Pre-frame controller tracks active leaves $A, B, C$ at revision $R$.
+     - Coordinator previews $A, B, C$, all recording expected revision $R$.
+     - Spatial refinement splits leaf $B$ into an `INTERNAL` node with 4 new child leaves.
+     - Sensor fusion into `PersistentAdaptiveMap` succeeds.
+     - *Correct Execution*:
+       1. `commitPreparedBatch({A, C})` against revision $R$ $\rightarrow$ succeeds, advances revision to $R+1$.
+       2. `eraseRegion(B)` $\rightarrow$ purges obsolete prior leaf state of $B$, advances revision to $R+2$.
+     - *Incorrect Execution*:
+       1. `eraseRegion(B)` $\rightarrow$ advances revision to $R+1$.
+       2. `commitPreparedBatch({A, C})` $\rightarrow$ REJECTED with `STALE_CONTROLLER_REVISION`.
+  22. **Future Fusion-Failure Ordering**: If structural refinement converted $B$ to `INTERNAL` but downstream sensor fusion fails:
+     - Discard ALL prepared observations immediately (do NOT commit $A$ or $C$);
+     - Call `eraseRegion(B)` because $B$ is no longer an active leaf;
+     - Controller temporal state for surviving unchanged regions remains completely uncorrupted.
+  23. **No Premature Coarsening Acknowledgements**: The future pipeline must never call `acknowledgeCoarsenResult` before committing the staged batch generated from the same revision. Post-fusion coarsening ACKs belong strictly AFTER batch commit.
+  24. **Decoupling and Zero Upstream Dependencies**: `ResolutionHysteresisController` contains zero dependencies on `PersistentAdaptiveMap`, `AdaptiveHierarchy`, `RecentObservationCache`, `FrameEvidence`, subtree collapse, replay, or the pipeline coordinator.
+  25. **Automatic Adaptation Engine Deferred**: Milestone 9B3E implements only the hysteresis transaction staging foundation. Automatic adaptation, recursive spatial refinement, sibling freshness, processing generation, and pipeline coordination loops remain deferred.
+- **Reason**: Provides transaction isolation for temporal resolution hysteresis, allowing multi-phase mapping pipelines to inspect decision outcomes during planning while committing temporal state strictly upon successful frame fusion.
+- **Consequences**: Autonomous mapping pipelines can safely stage incoming frames, plan multi-level refinement cascades, and guarantee zero policy drift if downstream sensor fusion fails.

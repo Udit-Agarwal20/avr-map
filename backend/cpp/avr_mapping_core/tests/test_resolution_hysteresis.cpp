@@ -598,6 +598,19 @@ TEST(ResolutionHysteresisTest, MemoryLayoutAndSizes) {
   EXPECT_EQ(sizeof(RegionHysteresisState), 24U);
   EXPECT_EQ(alignof(RegionHysteresisState), 8U);
   EXPECT_EQ(sizeof(HysteresisResult), 32U);
+
+  // M9B3E Prepared types
+  static_assert(std::is_copy_constructible_v<HysteresisPreparedObservation>);
+  static_assert(std::is_move_constructible_v<HysteresisPreparedObservation>);
+  static_assert(std::is_copy_assignable_v<HysteresisPreparedObservation>);
+  static_assert(std::is_move_assignable_v<HysteresisPreparedObservation>);
+  static_assert(std::is_trivially_copyable_v<HysteresisPreparedObservation>);
+
+  EXPECT_EQ(sizeof(HysteresisPreparedObservation), 128U);
+  EXPECT_EQ(alignof(HysteresisPreparedObservation), 8U);
+  EXPECT_EQ(sizeof(PreparedCommitStatus), 1U);
+  EXPECT_EQ(sizeof(PreparedBatchCommitStatus), 1U);
+  EXPECT_EQ(sizeof(PreparedBatchCommitResult), 16U);
 }
 
 }  // namespace

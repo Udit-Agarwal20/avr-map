@@ -80,6 +80,77 @@ struct HysteresisResult {
   constexpr bool operator==(const HysteresisResult&) const noexcept = default;
 };
 
+/**
+ * @brief Result status when committing a prepared hysteresis observation.
+ */
+enum class PreparedCommitStatus : uint8_t {
+  APPLIED = 0,
+  NOT_COMMITTABLE = 1,
+  STALE_CONTROLLER_REVISION = 2,
+  PRIOR_STATE_MISMATCH = 3,
+  REVISION_EXHAUSTED = 4,
+};
+
+[[nodiscard]] constexpr std::string_view preparedCommitStatusToString(PreparedCommitStatus status) noexcept {
+  switch (status) {
+    case PreparedCommitStatus::APPLIED:
+      return "APPLIED";
+    case PreparedCommitStatus::NOT_COMMITTABLE:
+      return "NOT_COMMITTABLE";
+    case PreparedCommitStatus::STALE_CONTROLLER_REVISION:
+      return "STALE_CONTROLLER_REVISION";
+    case PreparedCommitStatus::PRIOR_STATE_MISMATCH:
+      return "PRIOR_STATE_MISMATCH";
+    case PreparedCommitStatus::REVISION_EXHAUSTED:
+      return "REVISION_EXHAUSTED";
+  }
+  return "UNKNOWN";
+}
+
+/**
+ * @brief Result status when committing a batch of prepared hysteresis observations.
+ */
+enum class PreparedBatchCommitStatus : uint8_t {
+  APPLIED = 0,
+  NOT_COMMITTABLE = 1,
+  STALE_CONTROLLER_REVISION = 2,
+  PRIOR_STATE_MISMATCH = 3,
+  DUPLICATE_REGION = 4,
+  REVISION_EXHAUSTED = 5,
+};
+
+[[nodiscard]] constexpr std::string_view preparedBatchCommitStatusToString(PreparedBatchCommitStatus status) noexcept {
+  switch (status) {
+    case PreparedBatchCommitStatus::APPLIED:
+      return "APPLIED";
+    case PreparedBatchCommitStatus::NOT_COMMITTABLE:
+      return "NOT_COMMITTABLE";
+    case PreparedBatchCommitStatus::STALE_CONTROLLER_REVISION:
+      return "STALE_CONTROLLER_REVISION";
+    case PreparedBatchCommitStatus::PRIOR_STATE_MISMATCH:
+      return "PRIOR_STATE_MISMATCH";
+    case PreparedBatchCommitStatus::DUPLICATE_REGION:
+      return "DUPLICATE_REGION";
+    case PreparedBatchCommitStatus::REVISION_EXHAUSTED:
+      return "REVISION_EXHAUSTED";
+  }
+  return "UNKNOWN";
+}
+
+/**
+ * @brief Detailed result of a batch prepared hysteresis observation commit.
+ */
+struct PreparedBatchCommitResult {
+  PreparedBatchCommitStatus status{PreparedBatchCommitStatus::APPLIED};
+  size_t committed_count{0};
+
+  [[nodiscard]] constexpr bool isSuccess() const noexcept {
+    return status == PreparedBatchCommitStatus::APPLIED;
+  }
+
+  constexpr bool operator==(const PreparedBatchCommitResult&) const noexcept = default;
+};
+
 }  // namespace avr::mapping
 
 namespace AVR {

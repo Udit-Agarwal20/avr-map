@@ -39,6 +39,7 @@ add_executable(avr_mapping_tests
   test_resolution_hysteresis.cpp
   test_resolution_hysteresis_sequences.cpp
   test_resolution_hysteresis_stress.cpp
+  test_resolution_hysteresis_staged.cpp
   test_internal_coarsening_shadow.cpp
   test_internal_coarsening_sequences.cpp
   test_internal_coarsening_stress.cpp
