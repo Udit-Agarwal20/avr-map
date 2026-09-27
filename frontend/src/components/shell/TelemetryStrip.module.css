@@ -1,0 +1,91 @@
+.telemetryStrip {
+  height: var(--telemetry-strip-height);
+  background-color: var(--bg-1);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-4);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  user-select: none;
+  z-index: 100;
+}
+
+.leftGroup {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.itemLabel {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+.itemValue {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.resPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 4px;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  border: 1px solid transparent;
+}
+
+.resL0 {
+  color: var(--res-l0);
+  background-color: rgba(98, 211, 198, 0.1);
+  border-color: rgba(98, 211, 198, 0.25);
+}
+
+.resL1 {
+  color: var(--res-l1);
+  background-color: rgba(112, 184, 232, 0.1);
+  border-color: rgba(112, 184, 232, 0.25);
+}
+
+.resL2 {
+  color: var(--res-l2);
+  background-color: rgba(214, 180, 95, 0.1);
+  border-color: rgba(214, 180, 95, 0.25);
+}
+
+.resL3 {
+  color: var(--res-l3);
+  background-color: rgba(161, 138, 200, 0.1);
+  border-color: rgba(161, 138, 200, 0.25);
+}
+
+.rightGroup {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.dynamicAlert {
+  color: var(--dynamic-coral);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background-color: var(--dynamic-coral-dim);
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  border: 1px solid rgba(255, 117, 87, 0.3);
+}

@@ -1,0 +1,23 @@
+.shell {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  background-color: var(--bg-0);
+}
+
+.mainBody {
+  display: flex;
+  flex: 1;
+  height: calc(100vh - var(--top-bar-height) - var(--telemetry-strip-height));
+  overflow: hidden;
+}
+
+.contentRegion {
+  display: flex;
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+}

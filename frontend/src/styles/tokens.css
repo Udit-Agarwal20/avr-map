@@ -1,0 +1,67 @@
+/* tokens.css - Design tokens in OKLCH & HEX for AVR Console */
+:root {
+  /* Neutral Surface Palette */
+  --bg-0: #070A0D;          /* Base scene background */
+  --bg-1: #0B1015;          /* Workspace background */
+  --bg-2: #10171E;          /* Elevated surface */
+  --surface: #151E27;       /* Card and inspector surface */
+  --surface-hover: #1C2834; /* Hover surface */
+  --border: #1F2B35;        /* Standard hairline border */
+  --border-strong: #30404C; /* Active / focused border */
+
+  /* Text Hierarchy */
+  --text-primary: #E6EDF3;
+  --text-secondary: #A5B1BA;
+  --text-muted: #6E7B85;
+
+  /* Primary Technical Interaction Accent */
+  --accent-cyan: #55C6D4;
+  --accent-cyan-dim: rgba(85, 198, 212, 0.15);
+
+  /* Status Colors */
+  --status-healthy: #78C990;
+  --status-warning: #E3B866;
+  --status-critical: #EA6B67;
+  --status-unknown: #A596C8;
+  --status-info: #77A9E8;
+
+  /* Resolution Hierarchy Palette (Non-monotonic, non-red-green) */
+  --res-l0: #62D3C6; /* L0: 5 cm  (Turquoise / Mint) */
+  --res-l1: #70B8E8; /* L1: 10 cm (Sky Blue) */
+  --res-l2: #D6B45F; /* L2: 20 cm (Warm Sand / Amber) */
+  --res-l3: #A18AC8; /* L3: 40 cm (Muted Lavender) */
+
+  /* Dynamic & Motion Separation */
+  --dynamic-coral: #FF7557; /* DYNAMIC_EXCLUDED / Dynamic Clusters */
+  --dynamic-coral-dim: rgba(255, 117, 87, 0.18);
+  --static-fusable: #7E8B95; /* STATIC_FUSABLE */
+
+  /* Semantic Taxonomy Palette */
+  --sem-unknown: #A596C8;
+  --sem-ground: #8DB174;
+  --sem-road: #7E8B95;
+  --sem-vegetation: #4F8A6C;
+  --sem-building: #858DA0;
+  --sem-vehicle: #6FA9EC;
+  --sem-pedestrian: #ED8177;
+  --sem-obstacle-other: #DEB65F;
+
+  /* Grid & Radii */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+
+  /* Shell Heights and Widths */
+  --top-bar-height: 44px;
+  --nav-rail-width: 56px;
+  --telemetry-strip-height: 40px;
+  --inspector-width: 340px;
+}

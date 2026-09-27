@@ -1,0 +1,121 @@
+.topBar {
+  height: var(--top-bar-height);
+  background-color: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-4);
+  z-index: 100;
+  user-select: none;
+}
+
+.leftGroup {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  text-decoration: none;
+}
+
+.logoText {
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-primary);
+}
+
+.subtitle {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  padding-left: var(--space-2);
+  border-left: 1px solid var(--border);
+}
+
+.scenarioSwitcher {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  background-color: var(--bg-0);
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+
+.scenarioBtn {
+  padding: 2px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  border-radius: var(--radius-xs);
+  transition: all 0.15s ease;
+}
+
+.scenarioBtn:hover {
+  color: var(--text-secondary);
+  background-color: var(--surface);
+}
+
+.scenarioBtnActive {
+  color: var(--accent-cyan);
+  background-color: var(--surface);
+  font-weight: 600;
+}
+
+.centerGroup {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.rightGroup {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.playbackTag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-muted);
+  background-color: var(--bg-0);
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+}
+
+.pptBtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface);
+  color: var(--text-secondary);
+  transition: all 0.15s ease;
+}
+
+.pptBtn:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+
+.pptBtnActive {
+  background-color: var(--accent-cyan-dim);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+}
