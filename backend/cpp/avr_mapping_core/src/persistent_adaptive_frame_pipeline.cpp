@@ -176,6 +176,8 @@ AdaptivePipelineFrameResult PersistentAdaptiveFramePipeline::processFrame(
   // Semantic provider execution and validation
   result.semantic_diagnostics.provider_configured = (provider_ != nullptr);
   std::vector<PointRouting> routing(raw_points.size(), PointRouting::STATIC_FUSABLE);
+  DynamicPointSet extracted_dynamic_points{};
+  extracted_dynamic_points.frame_seq = frame_seq;
 
   if (provider_ != nullptr) {
     if (!raw_points.empty()) {
@@ -242,8 +244,11 @@ AdaptivePipelineFrameResult PersistentAdaptiveFramePipeline::processFrame(
           }
 
           for (const auto& obs : provider_result->observations) {
-            if (obs.motion_state == MotionClassification::CONFIRMED_DYNAMIC &&
-                obs.motion_confidence >= semantic_config_.min_motion_confidence) {
+            const bool is_dynamic =
+                (obs.motion_state == MotionClassification::CONFIRMED_DYNAMIC &&
+                 obs.motion_confidence >= semantic_config_.min_motion_confidence);
+
+            if (is_dynamic) {
               routing[obs.source_point_index] = PointRouting::DYNAMIC_EXCLUDED;
               ++result.semantic_diagnostics.confirmed_dynamic_points;
               ++result.semantic_diagnostics.dynamic_excluded_points;
@@ -263,9 +268,25 @@ AdaptivePipelineFrameResult PersistentAdaptiveFramePipeline::processFrame(
                     obs.motion_confidence,
                     semantic_config_);
                 ++result.semantic_diagnostics.semantic_observations_used;
+
+                if (is_dynamic) {
+                  extracted_dynamic_points.points.push_back(DynamicPoint{
+                      .source_point_index = obs.source_point_index,
+                      .position = pt,
+                      .semantic_class = obs.semantic_class,
+                      .semantic_confidence = obs.semantic_confidence,
+                      .motion_confidence = obs.motion_confidence,
+                  });
+                }
               }
             }
           }
+
+          std::sort(extracted_dynamic_points.points.begin(),
+                    extracted_dynamic_points.points.end(),
+                    [](const auto& a, const auto& b) {
+                      return a.source_point_index < b.source_point_index;
+                    });
         } catch (const std::bad_alloc&) {
           result.status = AdaptivePipelineStatus::FRAME_REJECTED_SEMANTIC_RESOURCE;
           return result;
@@ -375,6 +396,9 @@ AdaptivePipelineFrameResult PersistentAdaptiveFramePipeline::processFrame(
     } else {
       result.status = AdaptivePipelineStatus::SUCCESS;
     }
+    result.dynamic_points = std::move(extracted_dynamic_points);
+    result.semantic_diagnostics.dynamic_points_extracted =
+        result.dynamic_points.points.size();
     return result;
   }
 
@@ -713,6 +737,9 @@ AdaptivePipelineFrameResult PersistentAdaptiveFramePipeline::processFrame(
       return result;
     }
     result.status = AdaptivePipelineStatus::SUCCESS_CACHE_DEGRADED;
+    result.dynamic_points = std::move(extracted_dynamic_points);
+    result.semantic_diagnostics.dynamic_points_extracted =
+        result.dynamic_points.points.size();
     return result;
   }
 
@@ -1129,6 +1156,9 @@ AdaptivePipelineFrameResult PersistentAdaptiveFramePipeline::processFrame(
   } else {
     result.status = AdaptivePipelineStatus::SUCCESS;
   }
+  result.dynamic_points = std::move(extracted_dynamic_points);
+  result.semantic_diagnostics.dynamic_points_extracted =
+      result.dynamic_points.points.size();
 
   return result;
 }

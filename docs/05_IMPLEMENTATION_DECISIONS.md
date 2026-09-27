@@ -767,3 +767,84 @@ This document records architectural and implementation decisions for the **AVR-M
       - No persistent semantic payload or posteriors in cell payloads or coarsening shadows.
 - **Reason**: Enables safe, real-time localized semantic and dynamic obstacle perception while strictly preserving map integrity, eliminating dynamic ghosting in historical replays, and maintaining 100% geometry-only backward compatibility.
 - **Consequences**: Downstream planners receive fine-resolution topology around confirmed dynamic obstacles and safety-critical classes without corrupting persistent static map elevation cells.
+
+## ADR-025 — Dynamic Point Extraction and Deterministic 2.5D Clustering
+
+- **Date**: 2026-09-27
+- **Status**: Accepted
+- **Context**: Milestone 10C1 implements single-frame dynamic point extraction from the semantic perception pipeline and deterministic anisotropic spatial clustering into discrete object candidates (`DynamicObjectCluster`).
+- **Decisions**:
+  1. **Dynamic Point Extraction Contract**:
+     - A raw observation enters `DynamicPointSet` iff:
+       1. Its `source_point_index` is valid (`< raw_points.size()`);
+       2. Its geometry is valid and quantizable under frozen mapping rules (`pt.isFinite() && quantizeToBaseGridSafe(pt.x).has_value() && quantizeToBaseGridSafe(pt.y).has_value()`);
+       3. `obs.motion_state == MotionClassification::CONFIRMED_DYNAMIC`;
+       4. `obs.motion_confidence >= semantic_config.min_motion_confidence`.
+     - Points are strictly stored in ascending `source_point_index` (original arrival) order.
+  2. **Routing / Dynamic Conservation**:
+     - Points classified as confirmed dynamic are assigned `PointRouting::DYNAMIC_EXCLUDED` using the shared motion classification predicate.
+     - For geometrically valid points: `count(DYNAMIC_EXCLUDED) == DynamicPointSet.points.size()`.
+     - Geometrically invalid points (e.g., NaN coordinates) may carry provider dynamic annotations and are routed as `DYNAMIC_EXCLUDED` to prevent static map pollution, but they do NOT enter `DynamicPointSet` and do not increment `dynamic_points_extracted`.
+  3. **Owned Point Representation (`DynamicPoint`, `DynamicPointSet`)**:
+     - `DynamicPoint` stores `source_point_index`, `position` (`PointXYZ` owned by value), `semantic_class`, `semantic_confidence`, and `motion_confidence`.
+     - It does NOT store redundant `PointRouting` or `MotionClassification` fields (all members are guaranteed `CONFIRMED_DYNAMIC`).
+     - `DynamicPointSet` owns its points by value, guaranteeing complete memory safety across transient frame lifecycles.
+  4. **Coordinate Frame Terminology**:
+     - Input points are processed in the "pipeline input coordinate frame" without assuming an unverified world or odom frame transformation.
+     - Single-frame clustering requires no cross-frame coordinate frame contract.
+  5. **Static Map Independence & Publication Contract**:
+     - Dynamic point extraction operates as a derived side-channel. It causes zero change to static elevation fusion, tile allocation, coarsening shadows, hysteresis, replay cache, or adaptive topology.
+     - `DynamicPointSet` is published in `AdaptivePipelineFrameResult` strictly on success-like mapping statuses (`SUCCESS`, `SUCCESS_REPLAY_PENDING`, `SUCCESS_CACHE_DEGRADED`).
+     - On semantic rejection or any fatal map failure (including post-extraction mapping failures such as `FUSION_FAILED` or `FUSION_FAILED_AFTER_STRUCTURAL_CHANGE`), staged dynamic points are discarded: `dynamic_points` is published empty and `dynamic_points_extracted` diagnostic reports 0.
+     - When no provider is configured (`provider_ == nullptr`) or the provider is unavailable (`std::nullopt`), `dynamic_points` is published empty.
+  6. **Standalone Clustering Boundary & Public Input Contract (`DynamicClusterer`)**:
+     - Implemented as a standalone component depending solely on `dynamic_types.hpp`.
+     - Has zero dependencies on `PersistentAdaptiveMap`, `RecentObservationCache`, `ResolutionController`, or `ResolutionHysteresisController`.
+     - Public input contract: validates every input `DynamicPoint`:
+       1. `source_point_index` values must be strictly unique within the point set. If duplicate source indices are provided, `cluster()` rejects deterministically with `DynamicClusteringStatus::INVALID_INPUT` (enum value 4), returning empty clusters and noise.
+       2. `semantic_class` must satisfy `isValidSemanticClass(pt.semantic_class)`; malformed or out-of-range enums return `INVALID_INPUT`.
+       3. `semantic_confidence` must be finite and within $[0.0, 1.0]$; malformed values return `INVALID_INPUT`.
+       4. `motion_confidence` must be finite and within $[0.0, 1.0]$; malformed values return `INVALID_INPUT`.
+     - Contiguity is NOT required: non-contiguous source IDs (e.g. 2, 10, 100, 5000) are fully valid and preserved in output.
+     - Input order independence: the clusterer canonicalizes point traversal and spatial hashing via internal permutation (`canonical_order`) without mutating the caller-owned `DynamicPointSet`. Output (cluster IDs, memberships, centroids, AABBs, noise) is 100% bit-identical regardless of vector ordering.
+     - Clustering is executed outside the mapping transaction by downstream callers/coordinators, ensuring clustering resource exhaustion or errors cannot corrupt mapping state.
+  7. **Anisotropic 2.5D Neighborhood Geometry**:
+     - Two points $p$ and $q$ are direct neighbors iff:
+       $$(p_x - q_x)^2 + (p_y - q_y)^2 \le r_{xy}^2 \quad \text{AND} \quad |p_z - q_z| \le \Delta z_{max}$$
+     - Squared Euclidean distance in XY prevents unnecessary square roots.
+     - Asymmetric vertical tolerance $\Delta z_{max}$ prevents false vertical bridging between multi-level structures while allowing continuous horizontal object bounds.
+     - Exact zero vertical gap: when $\Delta z_{max} = 0.0$, points with identical $z$ ($dz = 0$) may cluster if XY condition passes, whereas points with any non-zero $dz$ do not.
+     - Defaults: $r_{xy} = 0.50\,\text{m}$, $\Delta z_{max} = 0.80\,\text{m}$, $\text{min\_cluster\_points} = 5$ (documented as provisional engineering defaults).
+  8. **Safe Voxel Quantization & Deterministic Spatial Hash**:
+     - Voxel coordinates use signed 64-bit integers (`int64_t vx, vy, vz`).
+     - Coordinate quantization is performed via `safeVoxelCoord(coord, voxel_size) -> optional<int64_t>`, verifying finite inputs, positive voxel size, finite quotient, finite floor, and strict containment within representable bounds ($[-9.0 \times 10^{18}, 9.0 \times 10^{18}]$) with room for $\pm 1$ neighbor offsets.
+     - Spatial hash arithmetic (`VoxelCoord3DHash`) uses `std::hash<int64_t>` and 64-bit unsigned combination arithmetic (`uint64_t` / `size_t`), completely preventing signed integer overflow or undefined behavior across extreme voxel coordinate ranges.
+     - If coordinate / voxel_size ratio overflows or cannot be safely represented (e.g. tiny radii like `numeric_limits<double>::min()` with finite coordinates), `cluster()` returns `DynamicClusteringStatus::NUMERIC_ERROR` with empty clusters and noise. No undefined behavior, no overflow, no clamping.
+     - Grid voxel dimensions: $V_{xy} = r_{xy}$, $V_z = (\Delta z_{max} > 0.0) ? \Delta z_{max} : r_{xy}$.
+     - Mathematical floor semantics: $v_x = \lfloor x / V_{xy} \rfloor$, preventing C++ truncation-toward-zero bugs across negative coordinates.
+     - Complete neighborhood proof: because voxel cell widths equal the neighborhood radius, searching the 27 adjacent voxels ($\Delta x, \Delta y, \Delta z \in \{-1, 0, 1\}$) in fixed lexicographical order is provably complete: any point pair with $|x_p - x_q| \le r_{xy}$, $|y_p - y_q| \le r_{xy}$, $|z_p - z_q| \le \Delta z_{max}$ has voxel index coordinate differences $|\Delta v| \le 1$.
+  9. **Connected Components & Complexity Contract**:
+     - Connected components are discovered using iterative BFS queue traversal (no recursive DFS; zero stack overflow risk).
+     - Candidate neighbors are sorted ascending by `source_point_index` before enqueueing, guaranteeing 100% deterministic BFS discovery order regardless of hash map layout.
+     - Algorithm complexity: expected $O(N)$ spatial hash construction, $O(N + E)$ graph traversal where $E$ is the number of evaluated candidate neighbor pairs. Worst-case can degrade toward $O(N^2)$ in pathologically dense point sets.
+  10. **Noise Handling & Conservation**:
+      - Connected components with count $< \text{min\_cluster\_points}$ are emitted into `noise_source_indices`.
+      - Noise points remain confirmed-dynamic; they are never fused into the static map or reclassified as static.
+      - Strict conservation holds: $\sum \text{cluster members} + \text{noise count} == \text{DynamicPointSet.points.size()}$.
+  11. **Canonical Cluster Identification & Frame-Local Scoping**:
+      - The canonical key for each cluster is $\min_{p \in C} (\text{source\_point\_index})$.
+      - Clusters are sorted ascending by canonical key, and assigned `cluster_local_id = 0 \dots K-1`.
+      - Cluster IDs have strictly NO temporal identity across frames.
+  12. **Centroid & AABB Calculation**:
+      - Centroids are computed using double-precision accumulators over sorted member coordinates, then stored as `PointXYZ`.
+      - AABB is computed as axis-aligned bounding min/max in pipeline input coordinates.
+  13. **Confidence-Gated Semantic Voting**:
+      - Only points with $\text{semantic\_confidence} \ge \text{min\_semantic\_confidence}$ vote for object class.
+      - For qualifying labels, $\text{weight}(\text{class}) = \sum \text{semantic\_confidence}$. Highest total weight wins.
+      - Ties are broken by lowest `SemanticClass` numeric enum value.
+      - If no qualifying non-UNKNOWN points exist, `dominant_class = SemanticClass::UNKNOWN`.
+      - Descriptive confidence means (`mean_semantic_confidence`, `mean_motion_confidence`) are computed over all cluster members.
+  14. **Exclusions**:
+      - No temporal tracking, `TrackId`, `DynamicTrack`, track lifecycle, Kalman filtering, Hungarian assignment, or timestamps (prerequisites for M10C1.5).
+      - No cluster-to-M4 resolution feedback.
+- **Consequences**: Provides deterministic, single-frame dynamic object candidates for downstream obstacle avoidance and temporal tracking without perturbing authoritative static mapping or replay caches.

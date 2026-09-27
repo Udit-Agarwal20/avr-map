@@ -51,6 +51,9 @@ add_executable(avr_mapping_tests
   test_persistent_adaptive_pipeline_coarsening.cpp
   test_persistent_adaptive_pipeline_semantic.cpp
   test_persistent_adaptive_pipeline_semantic_stress.cpp
+  test_dynamic_clustering.cpp
+  test_dynamic_extraction.cpp
+  test_dynamic_clustering_stress.cpp
 )
 
 target_link_libraries(avr_mapping_tests

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "avr_mapping/dynamic_types.hpp"
 #include "avr_mapping/recent_observation_cache.hpp"
 #include "avr_mapping/resolution_controller.hpp"
 #include "avr_mapping/resolution_decision.hpp"
@@ -255,6 +256,7 @@ struct SemanticFrameDiagnostics {
   uint64_t semantic_observations_used{0};
   uint64_t confirmed_dynamic_points{0};
   uint64_t dynamic_excluded_points{0};
+  uint64_t dynamic_points_extracted{0};
 
   constexpr bool operator==(const SemanticFrameDiagnostics&) const noexcept = default;
 };
@@ -298,6 +300,7 @@ struct AdaptivePipelineFrameResult {
   AdaptivePipelineStatus status{AdaptivePipelineStatus::FRAME_REJECTED_INPUT};
 
   SemanticFrameDiagnostics semantic_diagnostics{};
+  DynamicPointSet dynamic_points{};
 
   std::vector<PipelineDecisionRecord> decision_records{};
   std::vector<StructuralActionRecord> structural_action_records{};
