@@ -4,19 +4,52 @@
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background-color: var(--bg-0);
+  background-color: var(--bg-0, #0c1016);
+}
+
+.heroMissionShell {
+  background-color: #11161d;
+}
+
+.missionBody {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  position: relative;
+}
+
+.compactNavEdge {
+  width: var(--nav-rail-width);
+  height: 100%;
+  flex-shrink: 0;
+  z-index: 50;
+  transition: transform 0.2s ease;
+}
+
+.missionContent {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
 }
 
 .mainBody {
   display: flex;
   flex: 1;
-  height: calc(100vh - var(--top-bar-height) - var(--telemetry-strip-height));
+  min-width: 0;
+  min-height: 0;
+  height: calc(100vh - var(--top-bar-height, 48px) - var(--telemetry-strip-height, 36px));
   overflow: hidden;
 }
 
 .contentRegion {
   display: flex;
   flex: 1;
+  min-width: 0;
+  min-height: 0;
   height: 100%;
   overflow: hidden;
   position: relative;

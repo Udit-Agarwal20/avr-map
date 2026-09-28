@@ -12,7 +12,7 @@
   /* Text Hierarchy */
   --text-primary: #E6EDF3;
   --text-secondary: #A5B1BA;
-  --text-muted: #6E7B85;
+  --text-muted: #8C9AA5;
 
   /* Primary Technical Interaction Accent */
   --accent-cyan: #55C6D4;
@@ -58,6 +58,12 @@
   --radius-xs: 2px;
   --radius-sm: 4px;
   --radius-md: 6px;
+
+  --motion-fast: 100ms;
+  --motion-panel: 180ms;
+  --ease-ui: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --z-overlay: 40;
+  --z-dialog: 200;
 
   /* Shell Heights and Widths */
   --top-bar-height: 44px;

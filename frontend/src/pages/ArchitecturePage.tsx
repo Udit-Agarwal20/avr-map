@@ -20,14 +20,14 @@ export const ArchitecturePage: React.FC = () => {
               <span className={styles.stepNumber}>01</span>
               <span>POINT INGESTION & COORDINATE TRANSFORMATION</span>
             </span>
-            <Badge variant="cyan">RAW SENSOR</Badge>
+            <Badge variant="cyan">INPUT CONTRACT</Badge>
           </div>
           <div className={styles.stageBody}>
-            Point clouds arrive in sensor frame and undergo rigid transform to local vehicle reference frame. Coordinates normalized to 2.5D elevation and coordinate grid.
+            The core consumes finite XYZ observations in the supplied input coordinate frame. This console uses deterministic scene-frame fixtures. Sensor transport and pose transformation are future adapter responsibilities.
           </div>
           <div className={styles.stageMeta}>
             <span>INPUT: Raw LiDAR Point Stream</span>
-            <span>CONTRACT: Point3D (x, y, z)</span>
+            <span>CONTRACT: PointXYZ (x, y, z)</span>
           </div>
         </div>
 
@@ -46,7 +46,7 @@ export const ArchitecturePage: React.FC = () => {
             Deterministic mapping of points into 8 canonical classes: UNKNOWN, GROUND, ROAD, VEGETATION, BUILDING, VEHICLE, PEDESTRIAN, OBSTACLE_OTHER. Confidences assigned per point.
           </div>
           <div className={styles.stageMeta}>
-            <span>OUTPUT: SemanticTaggedPoint</span>
+            <span>OUTPUT: SemanticObservation</span>
             <span>CONFIDENCE: [0.0, 1.0]</span>
           </div>
         </div>
@@ -83,7 +83,7 @@ export const ArchitecturePage: React.FC = () => {
             <Badge variant="coral">FRAME-LOCAL</Badge>
           </div>
           <div className={styles.stageBody}>
-            DynamicClusterer performs spatial clustering on DYNAMIC_EXCLUDED points to produce frame-local object proposals [C-00..C-xx]. No temporal tracking, trajectory, or velocity estimation.
+            DynamicClusterer performs spatial clustering on DYNAMIC_EXCLUDED points to produce frame-local object proposals [C-00..C-xx]. Temporal tracking, trajectory and velocity are planned; they are not enabled at this checkpoint.
           </div>
           <div className={styles.stageMeta}>
             <span>OUTPUT: DynamicObjectCluster</span>

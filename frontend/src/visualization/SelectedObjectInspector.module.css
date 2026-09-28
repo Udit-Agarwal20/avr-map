@@ -1,0 +1,382 @@
+.inspectorPanel {
+  position: absolute;
+  top: 52px;
+  right: 16px;
+  width: 320px;
+  max-height: calc(100% - 110px);
+  background: rgba(12, 16, 22, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  display: flex;
+  flex-direction: column;
+  z-index: 40;
+  animation: slideIn 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.header {
+  height: 44px;
+  padding: 0 12px;
+  background: rgba(18, 24, 32, 0.9);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.headerLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.badgeIndicator {
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+.headerTitle {
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #f1f5f9;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+}
+
+.headerSubtitle {
+  font-family: var(--font-condensed);
+  font-size: 9.5px;
+  font-weight: 600;
+  color: #a5b1ba;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.closeBtn {
+  background: transparent;
+  border: none;
+  color: #b6c2cc;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 2px;
+  line-height: 1;
+  transition: all 0.12s;
+}
+
+.closeBtn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.content {
+  padding: 12px;
+  overflow-y: auto;
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ========================================================================= */
+/* Refinement Progression Card                                               */
+/* ========================================================================= */
+.refinementCard {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.refineStep,
+.refineStepFinal {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.refineTag {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 2px;
+  color: #b6c2cc;
+  font-family: var(--font-condensed);
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 5px;
+  letter-spacing: 0.05em;
+  margin-top: 1px;
+}
+
+.refineTagFinal {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  font-family: var(--font-condensed);
+  font-size: 9px;
+  font-weight: 600;
+  padding: 2px 5px;
+  letter-spacing: 0.05em;
+  margin-top: 1px;
+}
+
+.refineInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.refineTitle {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.refineDesc {
+  font-family: var(--font-sans);
+  font-size: 10px;
+  color: #b6c2cc;
+}
+
+.refineArrow {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: #a5b1ba;
+  padding-left: 28px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ========================================================================= */
+/* Evidence Card                                                             */
+/* ========================================================================= */
+.subSectionTitle {
+  font-family: var(--font-condensed);
+  font-size: 9.5px;
+  font-weight: 600;
+  color: #a5b1ba;
+  letter-spacing: 0.06em;
+  margin-top: 4px;
+  text-transform: uppercase;
+}
+
+.evidenceCard {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ========================================================================= */
+/* Canonical Decision Reasons List                                           */
+/* ========================================================================= */
+.reasonsList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+  padding: 6px;
+}
+
+.reasonRow {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 9px;
+}
+
+.reasonBullet {
+  color: #62d3c6;
+  font-size: 8px;
+}
+
+.reasonName {
+  color: #f1f5f9;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.reasonNote {
+  color: #a5b1ba;
+  font-family: var(--font-sans);
+  font-size: 9px;
+  margin-left: auto;
+}
+
+/* ========================================================================= */
+/* Metadata & Cluster styles                                                 */
+/* ========================================================================= */
+.metaRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.metaRow:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.label {
+  color: #b6c2cc;
+  font-size: 9.5px;
+  font-family: var(--font-condensed);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.value {
+  color: #f1f5f9;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.classValue {
+  font-weight: 600;
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.policyTierValue {
+  color: #ff7557;
+  font-size: 9.5px;
+  font-family: var(--font-condensed);
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-align: right;
+}
+
+.routingValue {
+  color: var(--dynamic-coral, #ff7557);
+  font-size: 9px;
+  font-family: var(--font-condensed);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-align: right;
+}
+
+.gridParams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.paramBox {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  padding: 6px 8px;
+}
+
+.paramLabel {
+  font-size: 8.5px;
+  font-family: var(--font-condensed);
+  color: #a5b1ba;
+  margin-bottom: 2px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.paramValue {
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: #f8fafc;
+}
+
+.detailBlock {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 3px;
+  padding: 8px;
+}
+
+.blockTitle {
+  font-size: 9px;
+  font-family: var(--font-condensed);
+  font-weight: 600;
+  color: #a5b1ba;
+  margin-bottom: 6px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.staticFusionExcluded {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: #b6c2cc;
+  letter-spacing: 0.04em;
+}
+
+.vectorRow {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: #cbd5e1;
+}
+
+.sensorDistRow {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: #62d3c6;
+  font-weight: 600;
+}
+
+.note {
+  font-family: var(--font-sans);
+  font-size: 9px;
+  color: #b6c2cc;
+  line-height: 1.4;
+  margin-top: 4px;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 2px;
+  border-left: 2px solid #a5b1ba;
+}
+
+.inspectorPanel { width:340px; top:64px; max-height:calc(100% - 160px); }
+@media(max-width:1099px) { .inspectorPanel { right:8px; width:min(340px,calc(100% - 16px)); } }
+
+:global(body[data-presentation='true']) .headerTitle { font-size:13px; }
+:global(body[data-presentation='true']) .value,:global(body[data-presentation='true']) .refineTitle { font-size:12px; }
+:global(body[data-presentation='true']) .label,:global(body[data-presentation='true']) .paramLabel,:global(body[data-presentation='true']) .reasonName { font-size:10px; }
+:global(body[data-presentation='true']) .paramValue { font-size:13px; }

@@ -89,3 +89,7 @@
   border-radius: var(--radius-xs);
   border: 1px solid rgba(255, 117, 87, 0.3);
 }
+
+.telemetryStrip { flex-shrink:0; }
+@media(max-width:1400px) { .itemLabel { font-size:9px; }.leftGroup,.rightGroup { gap:12px; } }
+@media(max-width:1099px) { .leftGroup>.item:nth-child(3),.rightGroup { display:none; }.telemetryStrip { padding:0 12px; } }

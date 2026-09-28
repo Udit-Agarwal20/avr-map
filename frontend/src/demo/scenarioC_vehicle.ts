@@ -1,3 +1,4 @@
+import { withCurrentReturns } from '../utils/topology';
 import { AdaptiveCell, DynamicObjectCluster, DynamicPoint, PerceptionFrame, PerceptionPoint } from '../types/perception';
 import { calculateDynamicSummary, calculateResolutionSummary, calculateSemanticSummary } from '../utils/summaries';
 
@@ -38,8 +39,8 @@ const dynamicClusters: DynamicObjectCluster[] = [
     pointCount: 8,
     memberSourceIndices: [50, 51, 52, 53, 54, 55, 56, 57],
     centroid: { x: -3.0, y: 14.5, z: 0.725 },
-    aabbMin: { x: -3.3, y: 13.3, z: 0.2 },
-    aabbMax: { x: -2.7, y: 15.7, z: 1.4 },
+    aabbMin: { x: -3.2, y: 13.5, z: 0.3 },
+    aabbMax: { x: -2.8, y: 15.5, z: 1.3 },
     dominantClass: 'VEHICLE',
     meanSemanticConfidence: 0.92,
     meanMotionConfidence: 0.95,
@@ -58,6 +59,8 @@ const cells: AdaptiveCell[] = [
   { cellId: 'C_L3_04', level: 3, x: 2.0, y: 20.0, sizeMeters: 0.40, pointCount: 3, elevationMean: -0.1, elevationMin: -0.11, elevationMax: -0.08, resolutionReasons: ['DISTANCE_BASELINE'] },
 ];
 
+const activeCells = withCurrentReturns(cells, points);
+
 export const scenarioC: PerceptionFrame = {
   frameSeq: 103,
   pipelineStatus: 'SUCCESS',
@@ -67,11 +70,11 @@ export const scenarioC: PerceptionFrame = {
   scenarioDescription: 'Confirmed dynamic vehicle moving in left lane. Dynamic points are excluded from static map and clustered into [C-00] VEHICLE.',
   sensorOrigin: { x: 0.0, y: 0.0, z: 0.0 },
   points,
-  cells,
+  cells: activeCells,
   dynamicPoints,
   dynamicClusters,
   noiseSourceIndices: [],
-  resolutionSummary: calculateResolutionSummary(cells),
+  resolutionSummary: calculateResolutionSummary(activeCells),
   semanticSummary: calculateSemanticSummary(points),
   dynamicSummary: calculateDynamicSummary(dynamicPoints, dynamicClusters, []),
 };

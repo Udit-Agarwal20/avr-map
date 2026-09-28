@@ -1,7 +1,7 @@
-/* typography.css - Technical typography hierarchy */
 :root {
   --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
+  --font-condensed: 'IBM Plex Sans Condensed', 'Arial Narrow', -apple-system-short, sans-serif-condensed, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
 }
 
 /* Tabular Numerics for Metrics and Coordinates */

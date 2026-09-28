@@ -1,0 +1,151 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.protocolCard {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 20px 24px;
+}
+
+.protocolHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.protocolTitle {
+  font: 600 13px var(--font-condensed);
+  letter-spacing: 0.08em;
+  color: var(--text-primary);
+  text-transform: uppercase;
+}
+
+.provenanceBadge {
+  font: 500 11px var(--font-mono);
+  color: var(--accent-cyan);
+  background: var(--accent-cyan-dim);
+  border: 1px solid var(--accent-cyan);
+  border-radius: var(--radius-xs);
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
+.warningBadge {
+  font: 500 11px var(--font-mono);
+  color: var(--status-warning);
+  background: rgba(227, 184, 102, 0.12);
+  border: 1px solid var(--status-warning);
+  border-radius: var(--radius-xs);
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
+.pipelineFlow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin: 16px 0;
+}
+
+.flowStep {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  padding: 16px;
+}
+
+.flowStepNumber {
+  font: 600 11px var(--font-mono);
+  color: var(--accent-cyan);
+  margin-bottom: 6px;
+}
+
+.flowStepTitle {
+  font: 600 13px var(--font-sans);
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.flowStepDesc {
+  font: 12px var(--font-sans);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.metricsGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.metricItem {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  padding: 12px 14px;
+}
+
+.metricName {
+  font: 600 12px var(--font-mono);
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.metricUnit {
+  font: 11px var(--font-condensed);
+  color: var(--accent-cyan);
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.metricDesc {
+  font: 11px var(--font-sans);
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.awaitingCard {
+  background: var(--bg-0);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 32px 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.awaitingTitle {
+  font: 600 16px var(--font-sans);
+  color: var(--text-primary);
+}
+
+.awaitingDesc {
+  max-width: 580px;
+  font: 13px var(--font-sans);
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.tagGroup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.modelledHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}

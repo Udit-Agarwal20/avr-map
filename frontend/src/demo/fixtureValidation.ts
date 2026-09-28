@@ -19,6 +19,15 @@ export interface ValidationResult {
 export function validatePerceptionFrame(frame: PerceptionFrame): ValidationResult {
   const errors: string[] = [];
 
+  const sourceById = new Map(frame.points.map(p => [p.sourceIndex, p]));
+  if (sourceById.size !== frame.points.length) errors.push('Duplicate perception source index');
+  if (new Set(frame.dynamicPoints.map(p=>p.sourceIndex)).size !== frame.dynamicPoints.length) errors.push('Duplicate dynamic source index');
+  if (new Set(frame.noiseSourceIndices).size !== frame.noiseSourceIndices.length) errors.push('Duplicate noise source index');
+  for (const p of frame.dynamicPoints) {
+    const source = sourceById.get(p.sourceIndex);
+    if (!source || source.routing !== 'DYNAMIC_EXCLUDED' || source.x !== p.position.x || source.y !== p.position.y || source.z !== p.position.z) errors.push(`Dynamic source ${p.sourceIndex} does not match perception observation`);
+  }
+
   // 1. Resolution summary equality
   const expectedRes = calculateResolutionSummary(frame.cells);
   if (
@@ -86,6 +95,7 @@ export function validatePerceptionFrame(frame: PerceptionFrame): ValidationResul
   }
 
   // 5. Cluster member verification and uniqueness
+  const dynamicById = new Map(frame.dynamicPoints.map(p => [p.sourceIndex, p]));
   const seenClusterMembers = new Set<number>();
   for (const cluster of frame.dynamicClusters) {
     if (cluster.pointCount !== cluster.memberSourceIndices.length) {
@@ -106,6 +116,22 @@ export function validatePerceptionFrame(frame: PerceptionFrame): ValidationResul
         );
       }
       seenClusterMembers.add(srcIdx);
+    }
+
+    const members = cluster.memberSourceIndices.flatMap(id => {
+      const point = dynamicById.get(id);
+      return point ? [point] : [];
+    });
+    if (members.length === 0) errors.push(`Cluster ${cluster.clusterLocalId} has no source members`);
+    else if (members.length === cluster.memberSourceIndices.length) {
+      const same = (a: number, b: number) => Number.isFinite(a) && Math.abs(a - b) < 1e-9;
+      if (cluster.canonicalSourcePointIndex !== Math.min(...cluster.memberSourceIndices)) errors.push(`Cluster ${cluster.clusterLocalId} canonical index mismatch`);
+      for (const axis of ['x', 'y', 'z'] as const) {
+        const values = members.map(p => p.position[axis]);
+        if (!same(cluster.aabbMin[axis], Math.min(...values)) || !same(cluster.aabbMax[axis], Math.max(...values))) errors.push(`Cluster ${cluster.clusterLocalId} ${axis} bounds do not match source members`);
+        if (!same(cluster.centroid[axis], values.reduce((sum, value) => sum + value, 0) / values.length)) errors.push(`Cluster ${cluster.clusterLocalId} ${axis} centroid does not match source members`);
+      }
+      if (!same(cluster.meanSemanticConfidence, members.reduce((sum, p) => sum + p.semanticConfidence, 0) / members.length) || !same(cluster.meanMotionConfidence, members.reduce((sum, p) => sum + p.motionConfidence, 0) / members.length)) errors.push(`Cluster ${cluster.clusterLocalId} confidence means do not match source members`);
     }
   }
 

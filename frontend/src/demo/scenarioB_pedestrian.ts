@@ -1,3 +1,4 @@
+import { withCurrentReturns } from '../utils/topology';
 import { AdaptiveCell, PerceptionFrame, PerceptionPoint } from '../types/perception';
 import { calculateDynamicSummary, calculateResolutionSummary, calculateSemanticSummary } from '../utils/summaries';
 
@@ -38,6 +39,8 @@ const cells: AdaptiveCell[] = [
   { cellId: 'B_L3_02', level: 3, x: 2.0, y: 18.0, sizeMeters: 0.40, pointCount: 4, elevationMean: -0.1, elevationMin: -0.11, elevationMax: -0.09, resolutionReasons: ['DISTANCE_BASELINE'] },
 ];
 
+const activeCells = withCurrentReturns(cells, points);
+
 export const scenarioB: PerceptionFrame = {
   frameSeq: 102,
   pipelineStatus: 'SUCCESS',
@@ -47,11 +50,11 @@ export const scenarioB: PerceptionFrame = {
   scenarioDescription: 'Vulnerable road user on crosswalk. Triggers safety-driven 5 cm (L0) refinement patch while preserving coarse L2/L3 allocation on open road.',
   sensorOrigin: { x: 0.0, y: 0.0, z: 0.0 },
   points,
-  cells,
+  cells: activeCells,
   dynamicPoints: [],
   dynamicClusters: [],
   noiseSourceIndices: [],
-  resolutionSummary: calculateResolutionSummary(cells),
+  resolutionSummary: calculateResolutionSummary(activeCells),
   semanticSummary: calculateSemanticSummary(points),
   dynamicSummary: calculateDynamicSummary([], [], []),
 };

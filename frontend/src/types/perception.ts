@@ -183,10 +183,20 @@ export interface AdaptiveCell {
   x: number;
   y: number;
   sizeMeters: number;
+  /**
+   * @brief Current-frame perception point returns spatially falling into this cell.
+   * NOTE: This represents current-frame LiDAR returns (PerceptionPoint count), NOT
+   * persistent accumulated static-fusable observations (AdaptiveCellPayload elevation.count()).
+   * Real backend adapters must not conflate persistent observation count with current-frame returns.
+   */
   pointCount: number;
-  elevationMean: number;
-  elevationMin: number;
-  elevationMax: number;
+  /**
+   * Optional persistent static-fusable elevation statistics.
+   * Undefined if the cell contains no static-fusable elevation support (e.g. dynamic-only hazard cell).
+   */
+  elevationMean?: number;
+  elevationMin?: number;
+  elevationMax?: number;
   resolutionReasons: ResolutionReason[];
 }
 
@@ -233,4 +243,33 @@ export interface PerceptionFrame {
   resolutionSummary: ResolutionSummary;
   semanticSummary: SemanticSummary;
   dynamicSummary: DynamicSummary;
+}
+
+/**
+ * @brief Narrow frontend visualization DTO for "WHY THIS RESOLUTION?" explainability.
+ *
+ * NOTE: This is a frontend visualization DTO, NOT a backend wire format.
+ * All populated fields must strictly correspond to truthful source/fixture state.
+ */
+export interface ResolutionExplanation {
+  cellId: string;
+  policyDistanceMeters: number;
+  baselineLevel: ResolutionLevel;
+  finalLevel: ResolutionLevel;
+  reasons: ResolutionReason[];
+  pointCount: number;
+  semanticClass?: SemanticClass;
+  semanticPolicyTier?: 'SAFETY_CRITICAL' | 'ELEVATED' | 'BENIGN';
+  dynamicRelevance?: boolean;
+  routing?: PointRouting | 'MIXED';
+  decisionEvidence?: string;
+  staticFusion: 'EXCLUDED' | 'FUSABLE' | 'MIXED' | 'NO_EVIDENCE';
+  hasStaticElevationSupport: boolean;
+  sourceIndices?: number[];
+  dynamicClusterId?: number;
+  staticElevationStats?: {
+    mean: number;
+    min: number;
+    max: number;
+  };
 }

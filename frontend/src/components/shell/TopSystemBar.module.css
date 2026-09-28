@@ -119,3 +119,7 @@
   border-color: var(--accent-cyan);
   color: var(--accent-cyan);
 }
+
+.topBar { flex-shrink:0; }
+@media(max-width:1400px) { .subtitle,.playbackTag { display:none; } }
+@media(max-width:1099px) { .scenarioSwitcher,.rightGroup>span,.centerGroup>span:first-child { display:none; }.topBar { padding:0 8px; }.rightGroup { gap:4px; }.pptBtn { font-size:10px; }.centerGroup { gap:4px; } }

@@ -98,11 +98,11 @@ export function pipelineStatusSeverity(
     case 'REPLAY_INTERNAL_ERROR':
     case 'FUSION_FAILED':
     case 'FUSION_FAILED_AFTER_STRUCTURAL_CHANGE':
-    case 'POLICY_COMMIT_INTERNAL_ERROR':
     case 'CACHE_COMMIT_INTERNAL_ERROR':
     case 'COARSENING_INTERNAL_ERROR':
       return 'error';
 
+    case 'POLICY_COMMIT_INTERNAL_ERROR':
     case 'POLICY_COMMIT_FATAL':
     case 'GENERATION_EXHAUSTED':
     case 'POLICY_REVISION_EXHAUSTED':

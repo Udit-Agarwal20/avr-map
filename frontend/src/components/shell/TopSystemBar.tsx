@@ -46,6 +46,7 @@ export const TopSystemBar: React.FC = () => {
               }`}
               onClick={() => setScenario(sc.id)}
               title={`${sc.label}: ${sc.name}`}
+              aria-label={`Scenario ${sc.id}: ${sc.name}`}
             >
               {sc.label}
             </button>
@@ -63,7 +64,7 @@ export const TopSystemBar: React.FC = () => {
       {/* Right Telemetry & Controls */}
       <div className={styles.rightGroup}>
         {/* Explicitly labeled demo playback rate - never false backend latency */}
-        <span className={styles.playbackTag}>DEMO PLAYBACK: 10 Hz</span>
+        <span className={styles.playbackTag}>STATIC FIXTURE</span>
 
         <span className="font-mono" style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
           FRAME #{meta.frameSeq.toString().padStart(5, '0')}

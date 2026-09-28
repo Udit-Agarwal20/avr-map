@@ -38,6 +38,7 @@ install/
 **/node_modules/
 frontend/dist/
 frontend/.vite/
+frontend/.screenshots/
 *.tsbuildinfo
 
 # Python Caches & Environments

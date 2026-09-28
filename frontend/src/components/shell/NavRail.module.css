@@ -1,6 +1,7 @@
 .navRail {
   width: var(--nav-rail-width);
-  height: calc(100vh - var(--top-bar-height) - var(--telemetry-strip-height));
+  height: 100%;
+  flex-shrink: 0;
   background-color: var(--bg-1);
   border-right: 1px solid var(--border);
   display: flex;
@@ -78,3 +79,7 @@
   letter-spacing: 0.04em;
   margin-top: 2px;
 }
+
+.label { display:none; position:absolute; left:48px; background:var(--surface); border:1px solid var(--border-strong); padding:8px 12px; color:var(--text-primary); font:12px var(--font-sans); text-transform:none; z-index:100; }
+.navItem:hover .label,.navItem:focus-visible .label { display:block; }
+.topLinks .navItem:last-child { margin-top:20px; }

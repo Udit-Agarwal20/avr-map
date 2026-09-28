@@ -1,3 +1,4 @@
+import { withCurrentReturns } from '../utils/topology';
 import { AdaptiveCell, PerceptionFrame, PerceptionPoint } from '../types/perception';
 import { calculateDynamicSummary, calculateResolutionSummary, calculateSemanticSummary } from '../utils/summaries';
 
@@ -50,6 +51,8 @@ const cells: AdaptiveCell[] = [
   { cellId: 'A_L1_02', level: 1, x: 3.5, y: 8.0, sizeMeters: 0.10, pointCount: 8, elevationMean: 0.05, elevationMin: -0.1, elevationMax: 0.18, resolutionReasons: ['GEOMETRY_COMPLEXITY'] },
 ];
 
+const activeCells = withCurrentReturns(cells, points);
+
 export const scenarioA: PerceptionFrame = {
   frameSeq: 101,
   pipelineStatus: 'SUCCESS',
@@ -59,11 +62,11 @@ export const scenarioA: PerceptionFrame = {
   scenarioDescription: 'Straight asphalt road flanked by buildings. Static baseline with coarse L2/L3 allocation and zero dynamic objects.',
   sensorOrigin: { x: 0.0, y: 0.0, z: 0.0 },
   points,
-  cells,
+  cells: activeCells,
   dynamicPoints: [],
   dynamicClusters: [],
   noiseSourceIndices: [],
-  resolutionSummary: calculateResolutionSummary(cells),
+  resolutionSummary: calculateResolutionSummary(activeCells),
   semanticSummary: calculateSemanticSummary(points),
   dynamicSummary: calculateDynamicSummary([], [], []),
 };

@@ -18,3 +18,11 @@ export interface PerceptionFrameSource {
   getActiveScenario(): ScenarioId;
   getCurrentFrame(): PerceptionFrame;
 }
+
+/** Future gateway boundary. A decoder must validate protocol version, sequence,
+ * snapshot/delta revisions and routing before publishing a frame to the runtime.
+ * No transport is connected or simulated by this interface. */
+export interface GatewayFrameDecoder {
+  decode(packet: ArrayBuffer): Promise<PerceptionFrame>;
+  reset(): void;
+}
