@@ -179,6 +179,7 @@ tests. Integration tests validate artifact schemas, fresh processes, independent
 hash calculation, deterministic topology, malformed/missing inputs and deliberate
 routing mismatch rejection. Unit tests exercise invariant-failure termination.
 
-PLANNED: real recorded dataset adapter/provenance workflow (M11B), followed by an
-explicit evidence review. FUTURE: production inference, temporal tracking, terrain
+IMPLEMENTED NOW: [recorded export adapter boundary](RECORDED_INPUT.md) with explicit
+pose, ontology and provenance contracts. M11B remains **AWAITING DATASET INPUT**;
+real-data experiments and the subsequent evidence review are pending. FUTURE: production inference, temporal tracking, terrain
 analysis, multi-surface representation, ROS2 and transport. No frontend files change.

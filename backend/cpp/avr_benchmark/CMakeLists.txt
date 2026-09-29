@@ -28,4 +28,7 @@ if(AVR_BUILD_TESTS)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration_test.py
       $<TARGET_FILE:avr_benchmark_runner> ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/validation
       ${CMAKE_SOURCE_DIR}/../../tools/benchmark_compare.py)
+  add_test(NAME Benchmark.RecordedAdapterContract
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/../../tools/tests/test_recorded_sequence_adapter.py
+      --runner $<TARGET_FILE:avr_benchmark_runner>)
 endif()

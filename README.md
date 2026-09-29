@@ -1,7 +1,7 @@
 # AVR-Map: Adaptive Variable-Resolution 2.5D LiDAR Mapping
 
 **SIH Problem Statement:** SIH26053 — Adaptive Variable-Resolution 2.5D LiDAR Mapping for Dynamic Environment Perception  
-**Current Status:** Tested persistent C++ mapping core, frame-local dynamic clustering, frozen frontend demo, and M11A offline benchmark harness. Real recorded-data validation is pending.
+**Current Status:** Tested persistent C++ mapping core, frame-local dynamic clustering, frozen frontend demo, M11A offline benchmark harness, and M11B recorded-input adapter. **AWAITING DATASET INPUT** for real recorded-data validation.
 
 See [offline benchmark instructions](docs/benchmark/README.md) and [M11 source audit](docs/benchmark/M11_AUDIT.md).
 

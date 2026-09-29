@@ -878,3 +878,27 @@ The bundled sequence is explicitly synthetic validation only. No uncertainty inp
 is invented where the current pipeline supplies null. No real-data performance,
 accuracy, dynamic-contamination count or tracking claim is inferred from the fixture.
 See [M11 audit](benchmark/M11_AUDIT.md) and [harness contract](benchmark/README.md).
+
+---
+
+## ADR-27: Recorded-data ingestion boundary without choosing or inventing a dataset
+
+**Status:** Adapter implemented; real experiment AWAITING DATASET INPUT (M11B).
+
+No real recording exists in the repository. Add a standard-library offline converter
+from explicitly labeled CSV returns plus timestamped rigid sensor-to-map poses to
+the M11A sequence envelope. Dataset-specific readers remain outside the mapping core.
+Require recording/license, semantic and independent motion provenance, complete
+explicit ontology mapping and a known coordinate convention. No default labels,
+confirmed motion, identity poses, filtering or timestamps are invented. Preserve
+original ordinals/intensity/evidence; transform XYZ and sensor origins consistently.
+
+Validate full conversion before atomic publication of its new output directory.
+Retain source content hashes and full adapter provenance; synthetic adapter tests
+remain labeled HARNESS VALIDATION FIXTURE ONLY / NOT REAL PERFORMANCE DATA. This
+boundary does not claim native dataset-family decoding, pose estimation, deskewing,
+model inference or actual benchmark results. See [recorded input contract](benchmark/RECORDED_INPUT.md).
+
+Stop here pending dataset input and a measured evidence review. No M12+ model,
+tracking, traversability, multi-surface or transport implementation is authorized by
+this milestone's completion alone.
