@@ -45,6 +45,21 @@ std::optional<ResolutionDecision> ResolutionController::decide(
     reasons.set(ResolutionReason::INSUFFICIENT_EVIDENCE);
   }
 
+  // Benchmark alternatives change allocation only. The pipeline still constructs
+  // identical evidence and routing, and applies normal hysteresis/replay/coarsening.
+  // Empty regions retain the baseline; supported uniform regions request L0.
+  if (config_.selection_strategy != ResolutionSelectionStrategy::FULL_AVR) {
+    ResolutionDecision decision;
+    decision.baseline_level = baseline_level;
+    decision.requested_level =
+        config_.selection_strategy == ResolutionSelectionStrategy::UNIFORM_L0_OBSERVED &&
+                signals.observation_count > 0
+            ? avr::spatial::L0 : baseline_level;
+    decision.evidence_state = evidence_state;
+    decision.reasons = reasons;
+    return decision;
+  }
+
   // 3. Evaluate continuous signals (uncertainty and geometry complexity) gated by evidence sufficiency
   uint8_t total_refinement_steps = 0;
 

@@ -1,13 +1,15 @@
 # AVR-Map: Adaptive Variable-Resolution 2.5D LiDAR Mapping
 
 **SIH Problem Statement:** SIH26053 — Adaptive Variable-Resolution 2.5D LiDAR Mapping for Dynamic Environment Perception  
-**Current Status:** Milestone 0 (Environment & Repository Bootstrap)
+**Current Status:** Tested persistent C++ mapping core, frame-local dynamic clustering, frozen frontend demo, and M11A offline benchmark harness. Real recorded-data validation is pending.
+
+See [offline benchmark instructions](docs/benchmark/README.md) and [M11 source audit](docs/benchmark/M11_AUDIT.md).
 
 ---
 
 ## Overview
 
-**AVR-Map** is a real-time autonomous-perception framework that transforms incoming 3D LiDAR point clouds into a hierarchical, semantic, variable-resolution 2.5D local environment map. Traditional mapping forces a trade-off between memory-prohibitive uniform fine grids and risk-prone coarse grids that lose safety-critical hazards. AVR-Map addresses this by dynamically allocating spatial resolution based on distance, semantic safety relevance, uncertainty, and geometry, preserving navigation-critical detail while dramatically reducing computational and memory overhead.
+**AVR-Map** is a prototype for allocating a 2.5D LiDAR map at 5, 10, 20 and 40 cm resolution. The implemented C++ core supports persistent adaptive mapping, semantic and motion evidence, replay-safe refinement, hysteresis and coarsening. Memory savings, real-time throughput and accuracy on recorded data have not yet been established. The current pipeline does not supply uncertainty observations.
 
 > **Core Principle:**  
 > *"The map is the product; the neural network is a component."*
@@ -16,7 +18,7 @@
 
 ## Architectural Runtimes
 
-- **Canonical Deployed Runtime:** Ubuntu 24.04 LTS (x86_64/ARM64) with **ROS 2 Jazzy Jalisco**. This environment hosts the end-to-end multi-node perception pipeline, hardware-accelerated neural segmentation (SalsaNext), and formal benchmarking.
+- **Planned Deployment Runtime:** Ubuntu 24.04 LTS (x86_64/ARM64) with **ROS 2 Jazzy Jalisco**. ROS2 adapters and production neural inference are planned; no model/runtime integration is claimed by the current portable core.
 - **Portable Development Platform:** macOS is supported for pure C++ algorithmic library development (`backend/cpp/`), unit/property testing, offline dataset tooling, and full frontend UI engineering (`frontend/`).
 
 ---
@@ -24,14 +26,14 @@
 ## Repository Structure
 
 - `docs/`: Authoritative project specifications (PRD, TRD, Backend Spec, Frontend Spec) and architecture decision logs (`05_IMPLEMENTATION_DECISIONS.md`).
-- `config/`: Declarative YAML configurations for mapping bounds, resolution bands, tracking, and vehicle parameters.
+- `config/`: Reserved configuration directories; current core defaults are in C++ types.
 - `backend/cpp/`: Standalone, ROS-independent pure C++20 algorithms, spatial data structures, and unit tests.
-- `backend/ros2_ws/`: Canonical ROS 2 Jazzy workspace containing package adapters and launch orchestration.
+- `backend/ros2_ws/`: Reserved for future ROS2 package adapters and launch orchestration.
 - `frontend/`: AVR Console — an operator and technical inspection interface built with React, Vite, and Three.js.
-- `datasets/`: Dataset storage, calibration files, and evaluation sequences (SemanticKITTI, RELLIS-3D).
-- `models/`: Pretrained model checkpoints and neural provider assets.
+- `datasets/`: Ignored local dataset storage; no real sequence is bundled.
+- `models/`: Reserved for separately acquired model assets.
 - `tools/`: Automated experiment runners, data converters, and offline utilities.
-- `results/`: Benchmark run databases (SQLite), metrics CSVs, and validation artifacts.
+- `results/`: Ignored local benchmark JSON/CSV outputs and validation logs.
 - `scripts/`: Development automation scripts (environment check, build, test, clean).
 
 ---

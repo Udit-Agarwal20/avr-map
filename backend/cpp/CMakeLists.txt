@@ -102,6 +102,7 @@ endif()
 # ------------------------------------------------------------------------------
 add_subdirectory(avr_spatial)
 add_subdirectory(avr_mapping_core)
+add_subdirectory(avr_benchmark)
 
 # Include infrastructure sanity tests directory
 if(AVR_BUILD_TESTS)

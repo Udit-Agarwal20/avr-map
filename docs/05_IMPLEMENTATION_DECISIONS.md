@@ -848,3 +848,33 @@ This document records architectural and implementation decisions for the **AVR-M
       - No temporal tracking, `TrackId`, `DynamicTrack`, track lifecycle, Kalman filtering, Hungarian assignment, or timestamps (prerequisites for M10C1.5).
       - No cluster-to-M4 resolution feedback.
 - **Consequences**: Provides deterministic, single-frame dynamic object candidates for downstream obstacle avoidance and temporal tracking without perturbing authoritative static mapping or replay caches.
+
+---
+
+## ADR-26: Offline allocation benchmark with common perception and routing
+
+**Status:** Accepted for M11A. **Scope:** offline validation, not production inference.
+
+Add a default-FULL_AVR selection strategy to ResolutionPolicyConfig. Distance-only
+and observed-support uniform L0 alter only the controller's target level. All modes
+retain identical SemanticProvider ingestion, motion thresholds, static/dynamic
+routing, replay, hysteresis and coarsening. No reason bits, semantic enums, pipeline
+statuses, CellKey representation or spatial levels change. The uniform override is
+identified by the explicit benchmark mode, without inventing a canonical reason bit.
+
+A separate avr_benchmark package owns the strict offline envelope (original source
+ordinal, XYZ, intensity, nanosecond timestamp, sensor origin, semantic/motion labels),
+provider, artifacts, timing and platform RSS code. The existing core input remains
+PointXYZ. Input is already in a fixed map frame; bounds are input validation, not
+synthetic dense allocation. Missing evidence fails before all three policy runs.
+
+One process per policy avoids cross-policy allocator history. Manifests record build
+provenance, full common defaults and SHA-256 sequence identity. Actual cached point
+order/routing is verified per frame. Timings bracket processFrame; standalone
+clustering is outside. RSS is whole-process OS memory, separate from sizeof-based
+components. Lifetime RSS peak includes input preflight; the artifact documents this.
+
+The bundled sequence is explicitly synthetic validation only. No uncertainty input
+is invented where the current pipeline supplies null. No real-data performance,
+accuracy, dynamic-contamination count or tracking claim is inferred from the fixture.
+See [M11 audit](benchmark/M11_AUDIT.md) and [harness contract](benchmark/README.md).

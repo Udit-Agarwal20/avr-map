@@ -95,10 +95,16 @@ struct ResolutionReasonBits {
   }
 };
 
+/** Resolution allocation only; never changes point routing or evidence ingestion. */
+enum class ResolutionSelectionStrategy : uint8_t {
+  FULL_AVR = 0,
+  DISTANCE_ONLY = 1,
+  UNIFORM_L0_OBSERVED = 2,
+};
+
 /**
  * @brief Immutable configuration defining the adaptive resolution policy and density gate.
- *
- * All thresholds represent configurable prototype defaults and will be calibrated on real datasets.
+ * All thresholds are prototype defaults to be calibrated on real datasets.
  */
 struct ResolutionPolicyConfig {
   double distance_threshold_1{10.0};  // [0, d1) -> L0 (5 cm)
@@ -118,7 +124,13 @@ struct ResolutionPolicyConfig {
   uint8_t uncertainty_refinement_steps{1};
   uint8_t geometry_refinement_steps{1};
 
+  // Selection only: semantic ingestion, routing, replay and hysteresis are unchanged.
+  ResolutionSelectionStrategy selection_strategy{ResolutionSelectionStrategy::FULL_AVR};
+
   [[nodiscard]] bool validate() const noexcept {
+    if (selection_strategy != ResolutionSelectionStrategy::FULL_AVR &&
+        selection_strategy != ResolutionSelectionStrategy::DISTANCE_ONLY &&
+        selection_strategy != ResolutionSelectionStrategy::UNIFORM_L0_OBSERVED) return false;
     if (!std::isfinite(distance_threshold_1) || distance_threshold_1 < 0.0) return false;
     if (!std::isfinite(distance_threshold_2) || distance_threshold_2 < 0.0) return false;
     if (!std::isfinite(distance_threshold_3) || distance_threshold_3 < 0.0) return false;

@@ -1,0 +1,10 @@
+AVR_SEQUENCE_V1
+name=avr-harness-validation
+kind=HARNESS_VALIDATION_FIXTURE
+semantic_provenance=SYNTHETIC_VALIDATION_LABELS
+source_description=Deterministic hand-authored validation points; not captured LiDAR
+license=Repository validation fixture
+pose_provenance=Synthetic fixed origin; no estimated odometry
+coordinate_frame=FIXED_MAP_FRAME
+bounds=-1,80,-1,1
+frames=frames.csv
